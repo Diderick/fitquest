@@ -47,6 +47,48 @@ test('authentication, validation, conflict detection and persistence', async () 
     assert.deepEqual(await (await get()).json(), { revision: 1, workouts });
     assert.equal((await put({ revision: 1, workouts: [] })).status, 200);
     assert.deepEqual(await (await get()).json(), { revision: 2, workouts: [] });
+    const api = (path, token, data) => fetch(`${base}${path}`, {
+      method: data ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      ...(data ? { body: JSON.stringify(data) } : {}),
+    });
+    const register = (email, username) => api('/v2/auth/register', null, { email, username, password: 'a long test password 123' });
+    const alice = await (await register('alice@example.test', 'Alice_test')).json();
+    const bob = await (await register('bob@example.test', 'Bob_test')).json();
+    assert.ok(alice.token && bob.token);
+    assert.equal((await register('alice@example.test', 'OtherUser')).status, 409);
+    assert.equal((await api('/v2/auth/login', null, { email: 'alice@example.test', password: 'wrong password 123' })).status, 401);
+    assert.equal((await api('/v2/auth/login', null, { email: 'alice@example.test', password: 'a long test password 123' })).status, 200);
+    assert.equal((await api('/v2/sync', null, { operations: [] })).status, 401);
+    const op = { id: 'first-operation', key: 'bl_start', value: 95.5, base: 0 };
+    const sync = (token, operations) => api('/v2/sync', token, { operations });
+    const saved = await (await sync(alice.token, [op])).json();
+    assert.deepEqual(saved.acknowledged, [op.id]);
+    assert.equal(saved.state.bl_start.value, 95.5);
+    assert.equal(saved.state.bl_current, undefined);
+    assert.equal((await sync(alice.token, [{ id: 'appearance', key: 'appearance_mode', value: 'dark', base: 0 }])).status, 200);
+    const duplicate = await (await sync(alice.token, [op])).json();
+    assert.equal(duplicate.state.bl_start.version, 1);
+    const conflict = await (await sync(alice.token, [{ ...op, id: 'conflict', value: 80 }])).json();
+    assert.deepEqual(conflict.conflicts, ['bl_start']);
+    assert.equal(conflict.state.bl_start.value, 95.5);
+    const privateState = await (await sync(bob.token, [])).json();
+    assert.deepEqual(privateState.state, {});
+    const search = await (await api('/v2/people?q=Alice_', bob.token)).json();
+    assert.equal(search.people[0].id, alice.user.id);
+    assert.equal(search.people[0].email, undefined);
+    await sync(bob.token, [{ id: 'follow', key: `following/${alice.user.id}`, value: true, base: 0 }]);
+    await sync(alice.token, [{ id: 'post', key: 'community_posts', value: ['An offline post'], base: 0 }]);
+    const social = await (await api('/v2/social', bob.token)).json();
+    assert.equal(social.following[0].id, alice.user.id);
+    assert.equal(social.posts[0].text, 'An offline post');
+    assert.equal(social.bl_start, undefined);
+    await sync(bob.token, [{ id: 'unfollow', key: `following/${alice.user.id}`, value: false, base: 1 }]);
+    assert.equal((await (await api('/v2/social', bob.token)).json()).following.length, 0);
+    await stop(); await start();
+    assert.equal((await (await sync(alice.token, [])).json()).state.bl_start.value, 95.5);
+    await api('/v2/auth/logout', alice.token, {});
+    assert.equal((await api('/v2/me', alice.token)).status, 401);
   } finally {
     if (child && child.exitCode === null) await stop();
     rmSync(dir, { recursive: true, force: true });

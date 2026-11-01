@@ -5,7 +5,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'offline_store.dart';
+import 'account_ui.dart';
+import 'step_tracker.dart';
 
 void main() => runApp(const FitQuestApp());
 
@@ -109,7 +111,7 @@ class LocalActivityRepository implements ActivityRepository {
 
   @override
   Future<List<Workout>?> load() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await OfflineStore.getInstance();
     final stored = prefs.getString(_key);
     if (stored == null) return null;
     final json = jsonDecode(stored) as List<dynamic>;
@@ -120,7 +122,7 @@ class LocalActivityRepository implements ActivityRepository {
 
   @override
   Future<void> save(List<Workout> workouts) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await OfflineStore.getInstance();
     final saved = await prefs.setString(
       _key,
       jsonEncode(workouts.map((workout) => workout.toJson()).toList()),
@@ -224,20 +226,6 @@ String _dayLabel(DateTime date) {
     return 'Yesterday';
   }
   return '${date.day}/${date.month}/${date.year}';
-}
-
-/// Steps are estimated from logged foot-based distance; there is no pedometer.
-int estimatedSteps(Iterable<Workout> workouts) {
-  var steps = 0.0;
-  for (final w in workouts) {
-    final km = w.distanceKm ?? 0;
-    steps += switch (w.activity) {
-      'Running' => km * 1000,
-      'Walking' || 'Hiking' => km * 1300,
-      _ => 0,
-    };
-  }
-  return steps.round();
 }
 
 IconData activityIcon(String activity) => switch (activity) {
@@ -421,47 +409,70 @@ class FitQuestApp extends StatefulWidget {
   State<FitQuestApp> createState() => _FitQuestAppState();
 }
 
-class _FitQuestAppState extends State<FitQuestApp> {
+class _FitQuestAppState extends State<FitQuestApp> with WidgetsBindingObserver {
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   ThemeMode mode = ThemeMode.dark;
   int tab = 0;
-  final ActivityRepository _activities = fitquestApiUrl.isEmpty
-      ? LocalActivityRepository()
-      : RemoteActivityRepository(fitquestApiUrl, fitquestApiToken);
+  final ActivityRepository _activities = LocalActivityRepository();
   int weeklyGoalMinutes = 180;
   bool _isRecording = false;
-  final List<Workout> workouts = fitquestApiUrl.isEmpty ? _demoWorkouts() : [];
-
-  static List<Workout> _demoWorkouts() {
-    final now = DateTime.now();
-    return [
-      Workout('Running', 32, now.subtract(const Duration(minutes: 1)),
-          distanceKm: 5.2),
-      Workout('Cycling', 56, now.subtract(const Duration(minutes: 2)),
-          distanceKm: 18.4),
-      Workout('Swimming', 36, now.subtract(const Duration(minutes: 3)),
-          distanceKm: 1.2),
-      Workout('Walking', 42, now.subtract(const Duration(minutes: 4)),
-          distanceKm: 3.6),
-    ];
-  }
+  final List<Workout> workouts = [];
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    OfflineStore.instance.addListener(_refreshStore);
+    StepTracker.instance.addListener(_refreshSteps);
+    OfflineStore.getInstance().then((store) {
+      if (mounted) {
+        store.start();
+        _refreshStore();
+      }
+    });
+    unawaited(StepTracker.instance.start());
     _loadActivities();
     _loadWeeklyGoal();
   }
 
+  void _refreshStore() {
+    unawaited(_loadActivities());
+    unawaited(_loadWeeklyGoal());
+    if (mounted) setState(() {});
+  }
+
+  void _refreshSteps() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(OfflineStore.instance.sync());
+      unawaited(StepTracker.instance.refresh());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    OfflineStore.instance.removeListener(_refreshStore);
+    StepTracker.instance.removeListener(_refreshSteps);
+    OfflineStore.instance.stop();
+    StepTracker.instance.stop();
+    super.dispose();
+  }
+
   Future<void> _loadActivities() async {
     try {
+      final scope = OfflineStore.instance.scope;
       final saved = await _activities.load();
-      if (saved != null && mounted) {
+      if (mounted && scope == OfflineStore.instance.scope) {
         setState(() {
           workouts
             ..clear()
-            ..addAll(saved);
+            ..addAll(saved ?? []);
         });
       }
     } catch (error) {
@@ -471,9 +482,14 @@ class _FitQuestAppState extends State<FitQuestApp> {
 
   Future<void> _loadWeeklyGoal() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await OfflineStore.getInstance();
       if (mounted) {
-        setState(() => weeklyGoalMinutes = prefs.getInt('weekly_goal') ?? 180);
+        setState(() {
+          weeklyGoalMinutes = prefs.getInt('weekly_goal') ?? 180;
+          mode = ThemeMode.values.firstWhere(
+              (value) => value.name == prefs.getString('appearance_mode'),
+              orElse: () => ThemeMode.dark);
+        });
       }
     } catch (error) {
       _showMessage('Could not load your weekly goal: $error');
@@ -482,7 +498,7 @@ class _FitQuestAppState extends State<FitQuestApp> {
 
   Future<void> _setWeeklyGoal(int minutes) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await OfflineStore.getInstance();
       final saved = await prefs.setInt('weekly_goal', minutes);
       if (!saved) throw StateError('Could not save your weekly goal.');
       if (mounted) setState(() => weeklyGoalMinutes = minutes);
@@ -710,7 +726,11 @@ class _FitQuestAppState extends State<FitQuestApp> {
           workouts: workouts,
           mode: mode,
           weeklyGoalMinutes: weeklyGoalMinutes,
-          onMode: (m) => setState(() => mode = m),
+          onMode: (m) {
+            setState(() => mode = m);
+            unawaited(
+                OfflineStore.instance.setString('appearance_mode', m.name));
+          },
           onWeeklyGoal: _setWeeklyGoal),
     ];
     return MaterialApp(
@@ -722,7 +742,27 @@ class _FitQuestAppState extends State<FitQuestApp> {
       darkTheme: _theme(Brightness.dark),
       themeMode: mode,
       home: Scaffold(
-        body: SafeArea(bottom: false, child: pages[tab]),
+        body: SafeArea(
+            bottom: false,
+            child: Column(children: [
+              ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.cloud_sync_outlined),
+                  title: Text(OfflineStore.instance.signedIn
+                      ? '@${OfflineStore.instance.user!['username']}'
+                      : 'Guest · saved offline'),
+                  subtitle: Text(OfflineStore.instance.status,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(_navigatorKey.currentContext!).push(
+                      MaterialPageRoute<void>(
+                          builder: (_) => const AccountPage()))),
+              Expanded(
+                  child: KeyedSubtree(
+                      key: ValueKey(
+                          '${OfflineStore.instance.scope}:${OfflineStore.instance.generation}'),
+                      child: pages[tab])),
+            ])),
         bottomNavigationBar: FitNavBar(index: tab, onSelect: goTab),
       ),
     );
@@ -1130,7 +1170,7 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final today = workouts.where((w) => _isToday(w.date)).toList();
-    final steps = estimatedSteps(today);
+    final steps = StepTracker.instance.today;
     final kcal = today.fold<int>(0, (sum, w) => sum + w.kcal);
     final km = today.fold<double>(0, (sum, w) => sum + (w.distanceKm ?? 0));
     final minutes = today.fold<int>(0, (sum, w) => sum + w.minutes);
@@ -1187,6 +1227,11 @@ class HomePage extends StatelessWidget {
           ]),
         ),
       ),
+      if (!StepTracker.instance.enabled)
+        TextButton.icon(
+            onPressed: StepTracker.instance.enable,
+            icon: const Icon(Icons.directions_walk),
+            label: const Text('Enable phone step counter')),
       const SizedBox(height: 22),
       Row(children: [
         _HomeStat(Icons.local_fire_department, _flameRed, fmtInt(kcal), 'kcal'),
@@ -1276,6 +1321,7 @@ class HomePage extends StatelessWidget {
               onPressed: () => onRecord(a)),
       ]),
       const SectionTitle('Recent activities'),
+      const SponsorPlacement(),
       ...workouts.take(3).map((w) => ActivityTile(
             w,
             onTap: () => _showWorkoutDetails(context, w),
@@ -1593,7 +1639,7 @@ class _TrainingPlansState extends State<_TrainingPlans> {
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((prefs) {
+    OfflineStore.getInstance().then((prefs) {
       if (mounted && plans.containsKey(prefs.getString('active_plan'))) {
         setState(() => activePlan = prefs.getString('active_plan')!);
       }
@@ -1601,7 +1647,7 @@ class _TrainingPlansState extends State<_TrainingPlans> {
   }
 
   Future<void> _selectPlan(String plan) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await OfflineStore.getInstance();
     final saved = await prefs.setString('active_plan', plan);
     if (!saved) throw StateError('Could not save your training plan.');
     if (mounted) setState(() => activePlan = plan);
@@ -1652,7 +1698,7 @@ class _TrainingPlansState extends State<_TrainingPlans> {
             ]),
           ),
         Text(
-            'Plans are saved on this device. Coaches, adaptive plans, and plan sharing need an account-backed service.',
+            'Plans are saved offline and sync to your account when connected. Coaches and adaptive plans are not available yet.',
             style: TextStyle(color: mutedOf(context), fontSize: 12)),
       ]);
 }
@@ -1690,7 +1736,7 @@ class _CommunityPageState extends State<CommunityPage> {
 
   Future<void> _loadCommunityState() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await OfflineStore.getInstance();
       if (!mounted) return;
       setState(() {
         posts = prefs.getStringList('community_posts') ?? [];
@@ -1713,7 +1759,7 @@ class _CommunityPageState extends State<CommunityPage> {
     final updated = Set<String>.of(joined);
     if (!updated.add(challenge)) updated.remove(challenge);
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await OfflineStore.getInstance();
       final saved =
           await prefs.setStringList('community_joined', updated.toList());
       if (!saved) throw StateError('Could not save challenge membership.');
@@ -1733,7 +1779,7 @@ class _CommunityPageState extends State<CommunityPage> {
     final updated = Set<String>.of(liked);
     if (!updated.add(id)) updated.remove(id);
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await OfflineStore.getInstance();
       final saved =
           await prefs.setStringList('community_liked', updated.toList());
       if (!saved) throw StateError('Could not save your reaction.');
@@ -1774,7 +1820,7 @@ class _CommunityPageState extends State<CommunityPage> {
       );
       if (text == null || text.isEmpty) return;
       final updated = [text, ...posts];
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await OfflineStore.getInstance();
       final saved = await prefs.setStringList('community_posts', updated);
       if (!saved) throw StateError('Could not save your post.');
       if (mounted) setState(() => posts = updated);
@@ -1807,11 +1853,18 @@ class _CommunityPageState extends State<CommunityPage> {
               children: switch (subTab) {
                 0 => _feed(context),
                 1 => [
-                    _emptyState(
-                        context,
-                        Icons.person_add_alt_1_outlined,
-                        'Friends need an account',
-                        'Following friends and seeing their training needs a FitQuest account service, which this prototype does not have yet.')
+                    AppCard(
+                        child: Column(children: [
+                      const Text(
+                          'Find friends by username and follow their community updates.'),
+                      FilledButton.icon(
+                          onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                  builder: (_) => const FriendsPage())),
+                          icon: const Icon(Icons.person_add_alt_1_outlined),
+                          label: const Text('Find friends & following')),
+                    ]))
                   ],
                 _ => [
                     _emptyState(
@@ -1825,6 +1878,11 @@ class _CommunityPageState extends State<CommunityPage> {
       ]);
 
   List<Widget> _feed(BuildContext context) => [
+        ListTile(
+            title: const Text('Friends’ updates'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute<void>(builder: (_) => const FriendsPage()))),
         for (final post in posts)
           _postCard(context,
               id: 'you-$post',
@@ -1841,6 +1899,7 @@ class _CommunityPageState extends State<CommunityPage> {
               withImage: _demoPosts[i].$3,
               baseLikes: _demoPosts[i].$4),
         const SectionTitle('Community challenges'),
+        const SponsorPlacement(),
         for (final challenge in [
           ('Move 150 minutes', 'A week of movement, at your pace.'),
           ('Weekend explorer', 'Record an outdoor activity this weekend.'),
@@ -1868,7 +1927,7 @@ class _CommunityPageState extends State<CommunityPage> {
             ]),
           ),
         Text(
-            'Demo posts are fictional. Social activity is local-only; accounts, real clubs, comments, and sharing across devices require a backend.',
+            'Demo posts are fictional. Your own posts sync when connected and are visible to followers. Find real friends in Friends & following.',
             style: TextStyle(color: mutedOf(context), fontSize: 12)),
       ];
 
@@ -1991,7 +2050,7 @@ class _NutritionPageState extends State<NutritionPage> {
   }
 
   Future<void> _loadNutrition() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await OfflineStore.getInstance();
     final storedGoal = prefs.getInt(_goalKey);
     final raw = prefs.getString(_entriesKey);
     final decoded =
@@ -2008,7 +2067,7 @@ class _NutritionPageState extends State<NutritionPage> {
   }
 
   Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await OfflineStore.getInstance();
     await prefs.setInt(_goalKey, calorieGoal);
     await prefs.setString(
       _entriesKey,
@@ -2177,7 +2236,7 @@ class _QuestsPageState extends State<QuestsPage> {
   @override
   Widget build(BuildContext context) {
     final workouts = widget.workouts;
-    final steps = estimatedSteps(workouts.where((w) => _isToday(w.date)));
+    final steps = StepTracker.instance.today;
     final dailyQuest = AppCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Daily Quest',
@@ -2568,7 +2627,7 @@ class _BiggestLoserCompetitionState extends State<BiggestLoserCompetition> {
   }
 
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await OfflineStore.getInstance();
     if (!mounted) return;
     setState(() {
       joined = prefs.getBool('bl_joined') ?? false;
@@ -2587,21 +2646,17 @@ class _BiggestLoserCompetitionState extends State<BiggestLoserCompetition> {
     final a = double.tryParse(start.text.replaceAll(',', '.'));
     final b = double.tryParse(current.text.replaceAll(',', '.'));
     if (a == null ||
-        b == null ||
         !a.isFinite ||
-        !b.isFinite ||
+        (current.text.trim().isNotEmpty &&
+            (b == null || !b.isFinite || b <= 0 || b > 500)) ||
         a <= 0 ||
-        b <= 0 ||
-        a > 500 ||
-        b > 500) {
+        a > 500) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Enter valid weights in kilograms.')));
       return;
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('bl_joined', true);
-    await prefs.setDouble('bl_start', a);
-    await prefs.setDouble('bl_current', b);
+    final prefs = await OfflineStore.getInstance();
+    await prefs.putAll({'bl_joined': true, 'bl_start': a, 'bl_current': b});
     if (!mounted) return;
     setState(() {
       joined = true;
@@ -2627,7 +2682,7 @@ class _BiggestLoserCompetitionState extends State<BiggestLoserCompetition> {
     final standings = <(String, double)>[
       ('Alex (demo)', 5.4),
       ('Sam (demo)', 3.8),
-      if (joined) ('You', percent),
+      if (joined && currentWeight != null) ('You', percent),
       ('Morgan (demo)', 1.9),
     ]..sort((a, b) => b.$2.compareTo(a.$2));
     return AppCard(
@@ -2648,14 +2703,21 @@ class _BiggestLoserCompetitionState extends State<BiggestLoserCompetition> {
               controller: current,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              decoration:
-                  const InputDecoration(labelText: 'Latest weigh-in (kg)')),
+              decoration: const InputDecoration(
+                  labelText: 'Latest weigh-in (kg)',
+                  helperText: 'Optional — add your next weigh-in later')),
           const SizedBox(height: 12),
           FilledButton.icon(
               onPressed: _save,
               icon: const Icon(Icons.save_outlined),
               label: Text(joined ? 'Update weigh-in' : 'Join & save weigh-in')),
-          if (joined) ...[
+          if (joined && currentWeight == null) ...[
+            const SizedBox(height: 14),
+            Text(
+                'Starting weight saved: ${startingWeight!.toStringAsFixed(1)} kg'),
+            const Text('Add your next weigh-in later to see your progress.'),
+          ],
+          if (joined && currentWeight != null) ...[
             const SizedBox(height: 14),
             Text('Your progress: ${percent.toStringAsFixed(2)}%',
                 style: const TextStyle(
@@ -2717,7 +2779,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await OfflineStore.getInstance();
     if (!mounted) return;
     setState(() {
       startWeight = prefs.getDouble('bl_start');
@@ -2752,7 +2814,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       );
       if (value == null || !value.isFinite || value < 2 || value > 70) return;
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await OfflineStore.getInstance();
       await prefs.setDouble('body_fat', value);
       if (mounted) setState(() => bodyFat = value);
     } finally {
@@ -2786,6 +2848,15 @@ class _ProfilePageState extends State<ProfilePage> {
       const PageHeader(title: 'Profile'),
       Expanded(
         child: ListView(padding: pagePadding, children: [
+          ListTile(
+              leading: const Icon(Icons.account_circle_outlined),
+              title: const Text('Account, friends & sync'),
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                      builder: (_) => const AccountPage()))),
+          const StepTrackingCard(),
+          const AdPreferences(),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(children: [
@@ -2826,7 +2897,9 @@ class _ProfilePageState extends State<ProfilePage> {
               _StatRow(
                 label: 'Weight',
                 value: currentWeight == null
-                    ? 'Not set'
+                    ? startWeight == null
+                        ? 'Not set'
+                        : '${startWeight!.toStringAsFixed(1)} kg (start)'
                     : '${currentWeight!.toStringAsFixed(1)} kg',
                 extra: delta == null
                     ? null
@@ -2882,9 +2955,7 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const SizedBox(height: 4),
           Text(
-              fitquestApiUrl.isEmpty
-                  ? 'Activities are stored locally on this device. Social accounts and connected devices need a backend.'
-                  : 'Activities are saved to your FitQuest server. Goals, plans, nutrition, and community features stay on this device.',
+              'Your data is saved on this device first. Sign in to sync activities, goals, plans, nutrition, weigh-ins and community posts when connected.',
               style: TextStyle(color: mutedOf(context), fontSize: 12)),
         ]),
       ),
@@ -3325,9 +3396,7 @@ class _GpsRecorderState extends State<GpsRecorder> {
                         starting ? 'Connecting to GPS…' : 'Start recording')),
               const SizedBox(height: 6),
               Text(
-                  fitquestApiUrl.isEmpty
-                      ? 'GPS runs only while this screen is open. Location history is saved with the activity on this device.'
-                      : 'GPS runs only while this screen is open. Saving an activity uploads its location history to your FitQuest server.',
+                  'GPS runs only while this screen is open. Routes save offline and sync privately to your account when connected.',
                   style: TextStyle(color: mutedOf(context), fontSize: 12)),
             ]),
       );

@@ -7,8 +7,12 @@ try {
     }
     New-Item -ItemType Directory -Path 'build' -Force | Out-Null
     # Gradle can echo encoded credentials. Keep all build output in an ignored file.
+    $fitquestPreviousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & flutter build apk --release --dart-define-from-file=apps/fitquest/client-config.json *> 'build/fitquest-private-build.log'
-    if ($LASTEXITCODE -ne 0) {
+    $fitquestBuildExit = $LASTEXITCODE
+    $ErrorActionPreference = $fitquestPreviousPreference
+    if ($fitquestBuildExit -ne 0) {
         throw 'APK build failed. Inspect build/fitquest-private-build.log locally; it may contain credentials.'
     }
     Write-Output 'Connected APK ready: build/app/outputs/flutter-apk/app-release.apk'

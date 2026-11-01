@@ -13,6 +13,11 @@ FitQuest is a Flutter fitness-tracking prototype with Strava-inspired activity l
 - Plan meals and record calories in the Nutrition tab with a daily target and quick-add entries.
 - Write local community posts, join sample challenges, and react to feed posts.
 - Keep activity data, weekly goals, plans, nutrition entries, posts, challenge membership, and reactions on the device.
+- Create an account, find friends by username, and follow their community posts.
+- Save changes offline and automatically sync your private account when connected.
+- Count real phone sensor steps with permission; workout distance does not add estimated steps.
+- Save a starting weight now and add the next weigh-in later.
+- Preview quiet sponsor placements on Home and Community, with a free hide option.
 
 ## Run
 
@@ -33,6 +38,6 @@ GPS recording asks for location permission when started and works only while the
 
 ## Prototype limitations
 
-Activity storage can connect to the authenticated FitQuest backend; see [backend setup](apps/fitquest/README.md) for deployment and Flutter build configuration. Builds without API configuration retain local storage. Accounts, live clubs and challenges, coach services, connected wearables, and real social sharing still need backend support. Community demo posts and leaderboard competitors are fictional.
+Accounts, following and private offline sync connect to the FitQuest backend; see [backend setup](apps/fitquest/README.md) for deployment, configuration and limitations. Creating an account or first sign-in needs a connection. Existing sessions and guest mode work offline. Live clubs, competitions, coach services and connected wearables still need support. Community demo posts and leaderboard competitors are fictional. Ads are placeholders until provider and store IDs are supplied.
 
 Workout, route, nutrition, post, goal, and plan data is stored locally using `shared_preferences` and is not encrypted. Avoid using this prototype for sensitive health data without secure storage, a privacy policy, and an appropriate backend.

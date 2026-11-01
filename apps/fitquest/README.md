@@ -1,10 +1,20 @@
-# FitQuest activity backend
+# FitQuest accounts and offline sync
 
-Single-user activity storage for the Flutter app. This token grants access to one
-shared activity collection; it is not a multi-user account system. Goals,
-nutrition, plans, and community features still use local storage. Existing local
-activities are not automatically uploaded. Configured builds start with the server
-collection, and report connection errors rather than falling back to local data.
+The Flutter app saves changes locally first. Activities, GPS routes, goals, plans,
+nutrition, weigh-ins, community posts, follow choices, ad preferences and daily
+phone step records sync to a signed-in user's private account. Guest mode works
+without a server. Creating an account imports the current guest workspace;
+signing into an existing account uses its own separate cache. Passwords are never
+saved on the phone. Session tokens use OS secure storage.
+
+Registration and first sign-in require a connection. An existing session remains
+usable offline. Sync retries every 30 seconds while the app is open, on resume,
+and after local changes. No background network-sync execution is promised when
+the OS suspends the Flutter app. Failed uploads stay in a durable outbox across
+restarts. Repeated operations are deduplicated by ID on the server. Concurrent
+edits on two devices are preserved until the user chooses a version in Account &
+sync. Nutrition and activity collections are treated as a single conflicting
+item; resolve them before editing on both devices again.
 
 ## Server
 
@@ -12,10 +22,11 @@ Deployed at `/home/northstar/apps/fitquest` on `ssh.northstarlabs.tech`.
 Public endpoint: `https://fitquest-api.northstarlabs.tech`.
 
 Generate a random token of at least 32 characters in `.env`, using the format in
-`.env.example`. Never commit the real token. Run:
+`.env.example`. This token is only for the legacy v1 endpoint, not account login.
+Never commit the real token. Initial setup or updates use:
 
 ```sh
-docker compose up -d --build api
+bash ~/apps/fitquest/deploy.sh
 curl http://127.0.0.1:8011/health
 ```
 
@@ -29,18 +40,19 @@ docker compose logs --tail=50 api tunnel
 ```
 
 Data lives in the `fitquest_fitquest-data` Docker volume. Preserve this volume
-when updating. Back up SQLite with its online backup API or stop the API before
+when updating. `deploy.sh` makes an online database backup before replacing an
+existing API container. Keep backups off the server as well. Back up SQLite with its online backup API or stop the API before
 copying the database; WAL files can contain uncheckpointed writes. Do not use
 `docker compose down -v` unless intentionally deleting activity data.
 
 ## Connect Flutter
 
-Copy `.env`'s token into a local, ignored `apps/fitquest/client-config.json`:
+The default API hostname is compiled into the app. To override it, use the local,
+ignored `apps/fitquest/client-config.json`. No shared credential belongs in a build:
 
 ```json
 {
-  "FITQUEST_API_URL": "https://fitquest-api.northstarlabs.tech",
-  "FITQUEST_API_TOKEN": "your-server-token"
+  "FITQUEST_API_URL": "https://fitquest-api.northstarlabs.tech"
 }
 ```
 
@@ -49,23 +61,62 @@ flutter run --dart-define-from-file=apps/fitquest/client-config.json
 flutter build apk --release --dart-define-from-file=apps/fitquest/client-config.json
 ```
 
-An API token included in a mobile build can be extracted. Use this deployment for
-a trusted single-user build; add per-user login and server-side ownership before
-distributing a public app. Builds without these defines retain local storage.
-
 On Windows, use `powershell -File apps/fitquest/build-connected.ps1` to build the
-connected APK without echoing encoded credentials. Its build log stays under the
-ignored `build/` directory and should remain private. To rotate credentials, run
-`bash ~/apps/fitquest/rotate-token.sh` on the server, copy the updated private
-`client-config.json` to this folder, and rebuild any connected clients.
+connected APK. Its build log stays under the ignored `build/` directory.
+
+## Accounts and friends
+
+SQLite contains users, hashed sessions, per-user state, sync receipts and follow
+relationships. Passwords use a random salt and scrypt (N=32768, r=8, p=1). Sessions
+expire after 90 days; expired sessions require sign-in to resume sync, while
+local logging continues. Authentication endpoints are rate-limited. Email
+verification, password recovery, account deletion and store purchase verification
+are not implemented yet; these need completion before public store release.
+
+People are discoverable by public username, never email. Following is one-way;
+mutual follows appear as friends. Community posts are shared with followers.
+Weight, routes and nutrition are not included in social responses. Cached people
+and follow choices work offline; finding new people needs a connection.
+
+Local data is separated by account but uses unencrypted SharedPreferences. Secure
+storage protects session tokens. Plan a local-data encryption migration and a
+privacy policy before distributing sensitive health-data features publicly.
+
+## Phone steps and sponsor placements
+
+Android uses TYPE_STEP_COUNTER and an optional health foreground service with an
+ongoing notification. Counting begins from the first enabled sensor reading,
+continues offline, and handles counter resets and phone reboots without adding a
+previous boot's counter. Reopen FitQuest after a reboot or force-stop. Android
+cannot reconstruct missing daily history while its listener is stopped. Daily
+totals use the phone's local calendar day. Motion permission is required and
+notification permission is requested. Devices without a sensor show unavailable.
+
+iOS uses CMPedometer to query the phone's steps since local midnight and requests
+Motion & Fitness access. It requires a physical iPhone and a macOS build to
+validate; the Windows Android build cannot verify the iOS integration. Neither
+platform adds workout distance estimates to sensor steps.
+
+Only Home and Community have labeled sponsor preview cards. They can be hidden
+for free in Profile or Account & sync. There is no ad SDK, live advertising,
+tracking, billing or fabricated purchase entitlement. Supply AdMob app/ad-unit IDs
+and store product IDs to implement live ads, consent and a verified remove-ads
+purchase. No ads appear in GPS recording, weigh-in or login forms.
 
 ## API
 
-`GET /health` is public. Other endpoints require `Authorization: Bearer TOKEN`.
-`GET /v1/activities` returns `{"revision":0,"workouts":[]}`. `PUT /v1/activities`
-accepts the same shape and returns the new revision. A stale revision returns 409
-without modifying data. Restart the client to reload before trying again. Requests
-are limited to 2 MiB; workouts and GPS coordinates are validated.
+`GET /health` is public. `POST /v2/auth/register` and `/v2/auth/login` accept an
+email/password, plus username for registration. Other v2 routes require the
+returned session token as `Authorization: Bearer TOKEN`:
+
+- `GET /v2/me`, `POST /v2/auth/logout`
+- `POST /v2/sync`: `{operations: [{id,key,value,base}]}`; returns acknowledgments,
+  conflicting keys and private state with per-key versions.
+- `GET /v2/people?q=prefix`, `GET /v2/social`
+
+The old `/v1/activities` API and its original database row remain available for
+previous single-user builds. That shared collection is never automatically
+assigned to a new account. New builds do not include the old shared token.
 
 ## Verification
 
@@ -77,9 +128,15 @@ flutter test
 flutter analyze
 ```
 
-To verify the deployed API through the actual Flutter repository (reads and saves
-the current collection with revision protection):
+To smoke-test the deployed public API from Windows, with unique temporary
+accounts removed afterward, upload `smoke.mjs` to the server and container first:
 
 ```sh
-flutter test test/remote_activity_repository_test.dart --dart-define-from-file=apps/fitquest/client-config.json --dart-define=FITQUEST_RUN_LIVE_TEST=true
+scp apps/fitquest/smoke.mjs ssh.northstarlabs.tech:apps/fitquest/
+ssh ssh.northstarlabs.tech 'cd ~/apps/fitquest && docker compose cp smoke.mjs api:/tmp/fitquest-smoke.mjs'
 ```
+
+Then in PowerShell run `$env:FITQUEST_SMOKE_SSH='1'` followed by
+`node apps/fitquest/smoke.mjs`. The test prints no credentials and cleans up only
+the accounts it creates. Android sensor permissions, background operation,
+midnight rollover and reboots still need real-phone QA.

@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fitquest/main.dart';
+import 'package:fitquest/offline_store.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 void main() {
   test('activity serialization preserves its GPS route', () {
@@ -58,8 +60,35 @@ void main() {
     expect(streakStarter.earned(gap), isFalse);
   });
 
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+    OfflineStore.instance.stop();
+    OfflineStore.instance = OfflineStore();
+    await OfflineStore.instance.initialize();
+  });
+
+  testWidgets('starting weight can be saved without a second weigh-in',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(child: BiggestLoserCompetition()))));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, '95.5');
+    await tester.tap(find.text('Join & save weigh-in'));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(find.text('Starting weight saved: 95.5 kg'), findsOneWidget);
+    final store = OfflineStore.instance;
+    expect(store.getDouble('bl_start'), 95.5);
+    expect(store.getDouble('bl_current'), isNull);
+    await tester.enterText(find.byType(TextField).last, '94');
+    await tester.tap(find.text('Update weigh-in'));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(find.text('Your progress: 1.57%'), findsOneWidget);
   });
 
   testWidgets('shows the FitQuest dashboard and weekly progress',
@@ -107,6 +136,8 @@ void main() {
     await tester.enterText(fields.at(1), '5.2');
     await tester.enterText(fields.at(2), 'Easy morning run');
     await tester.tap(find.text('Save workout'));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Easy morning run'), findsOneWidget);

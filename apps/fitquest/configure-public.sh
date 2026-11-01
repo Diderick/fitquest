@@ -23,7 +23,6 @@ from pathlib import Path
 token = next(line.split('=', 1)[1] for line in Path('.env').read_text().splitlines() if line.startswith('FITQUEST_API_TOKEN='))
 Path('client-config.json').write_text(json.dumps({
     'FITQUEST_API_URL': 'https://fitquest-api.northstarlabs.tech',
-    'FITQUEST_API_TOKEN': token,
 }, indent=2) + '\n')
 Path('client-config.json').chmod(0o600)
 PY

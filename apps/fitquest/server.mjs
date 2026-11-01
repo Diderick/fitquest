@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { accounts } from './accounts.mjs';
 
 const token = process.env.FITQUEST_API_TOKEN;
 if (!token || token.length < 32) throw new Error('FITQUEST_API_TOKEN must contain at least 32 characters');
@@ -27,8 +28,10 @@ function reply(res, status, body, headers = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
 }
+const accountRoute = accounts(db, reply);
 const server = http.createServer(async (req, res) => {
   if (req.url === '/health' && req.method === 'GET') return reply(res, 200, { status: 'ok' });
+  if (await accountRoute(req, res)) return;
   const supplied = Buffer.from(req.headers.authorization ?? '');
   const expected = Buffer.from(`Bearer ${token}`);
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
