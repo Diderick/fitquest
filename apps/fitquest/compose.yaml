@@ -6,6 +6,12 @@ services:
     init: true
     environment:
       FITQUEST_API_TOKEN: ${FITQUEST_API_TOKEN:?Set FITQUEST_API_TOKEN in .env}
+      OAUTH_REDIRECT_BASE: https://fitquest-api.northstarlabs.tech
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
+      FACEBOOK_GRAPH_VERSION: ${FACEBOOK_GRAPH_VERSION:-}
     ports:
       - "127.0.0.1:8011:8000"
     volumes:

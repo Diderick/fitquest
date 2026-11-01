@@ -9,6 +9,8 @@ import 'offline_store.dart';
 import 'account_ui.dart';
 import 'step_tracker.dart';
 import 'challenge_ui.dart';
+import 'activity_sharing.dart';
+import 'social_auth.dart';
 
 void main() => runApp(const FitQuestApp());
 
@@ -424,6 +426,7 @@ class _FitQuestAppState extends State<FitQuestApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(SocialAuth.instance.initialize());
     OfflineStore.instance.addListener(_refreshStore);
     StepTracker.instance.addListener(_refreshSteps);
     OfflineStore.getInstance().then((store) {
@@ -1111,6 +1114,10 @@ class ActivityTile extends StatelessWidget {
         ),
         Text(_dayLabel(workout.date),
             style: TextStyle(color: mutedOf(context), fontSize: 12)),
+        IconButton(
+            tooltip: 'Share activity',
+            onPressed: () => _openActivityShare(context, workout),
+            icon: const Icon(Icons.ios_share, size: 20)),
       ]),
     );
   }
@@ -1120,7 +1127,8 @@ void _showWorkoutDetails(BuildContext context, Workout workout) {
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
-    builder: (context) => Padding(
+    isScrollControlled: true,
+    builder: (context) => SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
       child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1145,10 +1153,28 @@ void _showWorkoutDetails(BuildContext context, Workout workout) {
               const SizedBox(height: 12),
               Text(workout.notes),
             ],
+            const SizedBox(height: 12),
+            FilledButton.icon(
+                onPressed: () => _openActivityShare(context, workout),
+                icon: const Icon(Icons.ios_share),
+                label: const Text('Share activity')),
           ]),
     ),
   );
 }
+
+void _openActivityShare(BuildContext context, Workout workout) =>
+    Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+            builder: (_) => ActivitySharePage(
+                activity: ActivityShareData(
+                    activity: workout.activity,
+                    minutes: workout.minutes,
+                    date: workout.date,
+                    distanceKm: workout.distanceKm,
+                    notes: workout.notes,
+                    route: workout.route))));
 
 // ---------------------------------------------------------------------------
 // Home

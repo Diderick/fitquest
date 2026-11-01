@@ -66,6 +66,11 @@ connected APK. Its build log stays under the ignored `build/` directory.
 
 ## Accounts and friends
 
+Google/Facebook browser sign-in and explicit account linking are prepared; see
+[social sign-in setup](SOCIAL_SETUP.md) to configure provider registrations.
+Without credentials, these buttons stay disabled and email login still works.
+The same guide covers activity image/text sharing to installed apps.
+
 SQLite contains users, hashed sessions, per-user state, sync receipts and follow
 relationships. Passwords use a random salt and scrypt (N=32768, r=8, p=1). Sessions
 expire after 90 days; expired sessions require sign-in to resume sync, while
@@ -156,7 +161,7 @@ assigned to a new account. New builds do not include the old shared token.
 Node 22 or newer is required (SQLite is built in).
 
 ```sh
-node --test apps/fitquest/server.test.mjs
+node --test apps/fitquest/server.test.mjs apps/fitquest/oauth.test.mjs
 flutter test
 flutter analyze
 ```

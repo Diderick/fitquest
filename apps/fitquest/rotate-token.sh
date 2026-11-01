@@ -7,7 +7,11 @@ import json
 import secrets
 from pathlib import Path
 token = secrets.token_urlsafe(48)
-Path('.env').write_text('FITQUEST_API_TOKEN=' + token + '\n')
+config = Path('.env')
+lines = config.read_text().splitlines() if config.exists() else []
+lines = [line for line in lines if not line.startswith('FITQUEST_API_TOKEN=')]
+lines.append('FITQUEST_API_TOKEN=' + token)
+config.write_text('\n'.join(lines) + '\n')
 Path('.env').chmod(0o600)
 Path('client-config.json').write_text(json.dumps({
     'FITQUEST_API_URL': 'https://fitquest-api.northstarlabs.tech',

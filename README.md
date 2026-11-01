@@ -20,6 +20,8 @@ FitQuest is a Flutter fitness-tracking prototype with Strava-inspired activity l
 - Preview quiet sponsor placements on Home and Community, with a free hide option.
 - Create military-style, CrossFit-style or custom fitness challenges, set exercise targets, and log results offline.
 - Share challenges with followers, join friends' tests, and compare per-exercise results in separate prescribed/scaled divisions.
+- Share an activity as an image card or text through the phone's share sheet, or post its summary to the FitQuest feed. Notes and route sketches default off.
+- Google/Facebook sign-in and account linking are prepared; activation needs [provider registration](apps/fitquest/SOCIAL_SETUP.md).
 
 ## Run
 

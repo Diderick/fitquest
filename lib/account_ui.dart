@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'offline_store.dart';
 import 'step_tracker.dart';
+import 'social_auth.dart';
 
 String jsonEncodeSocial(Map<String, dynamic> value) => jsonEncode(value);
 Map<String, dynamic> decodeSocial(String value) =>
@@ -100,6 +101,7 @@ class _AccountPageState extends State<AccountPage> {
                 const SizedBox(height: 12),
                 Text(store.status),
                 Text('${store.pending} changes pending'),
+                const SocialSignInButtons(linkAccount: true),
                 const SizedBox(height: 12),
                 FilledButton.icon(
                     onPressed: store.syncing ? null : store.sync,
@@ -164,6 +166,8 @@ class _AccountPageState extends State<AccountPage> {
                 const SizedBox(height: 12),
                 const Text(
                     'Keep using FitQuest offline. Connect once to create an account or sign in on a new phone; future changes sync automatically.'),
+                const SocialSignInButtons(),
+                const Divider(),
                 if (register)
                   TextField(
                       controller: username,
@@ -221,6 +225,57 @@ class _AccountPageState extends State<AccountPage> {
               const StepTrackingCard(),
               const AdPreferences(),
             ]));
+      });
+}
+
+class SocialSignInButtons extends StatefulWidget {
+  final bool linkAccount;
+  const SocialSignInButtons({super.key, this.linkAccount = false});
+  @override
+  State<SocialSignInButtons> createState() => _SocialSignInButtonsState();
+}
+
+class _SocialSignInButtonsState extends State<SocialSignInButtons> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(SocialAuth.instance.refresh());
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+      animation: SocialAuth.instance,
+      builder: (context, _) {
+        final auth = SocialAuth.instance;
+        return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 12),
+              for (final provider in ['google', 'facebook'])
+                OutlinedButton.icon(
+                    onPressed: auth.waiting ||
+                            auth.providers[provider] != true ||
+                            (widget.linkAccount &&
+                                auth.linked.contains(provider))
+                        ? null
+                        : () => auth.start(provider),
+                    icon: Icon(provider == 'google'
+                        ? Icons.account_circle_outlined
+                        : Icons.facebook),
+                    label: Text(
+                        '${widget.linkAccount ? auth.linked.contains(provider) ? 'Linked to' : 'Link' : 'Continue with'} ${provider == 'google' ? 'Google' : 'Facebook'}')),
+              if (!auth.providers.values.any((available) => available))
+                const Text(
+                    'Google and Facebook sign-in will be available once connected. Email sign-in works now.'),
+              if (!widget.linkAccount)
+                const Text(
+                    'New social accounts receive a public FitQuest username. Guest data is imported only when a new account is created.'),
+              if (auth.message != null) Text(auth.message!),
+              if (auth.waiting)
+                TextButton(
+                    onPressed: auth.cancel,
+                    child: const Text('Cancel browser sign-in')),
+            ]);
       });
 }
 

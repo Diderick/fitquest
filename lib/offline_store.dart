@@ -209,10 +209,22 @@ class OfflineStore extends ChangeNotifier {
           'password': password,
           if (username != null) 'username': username
         });
+    await acceptSession(session, importGuest: username != null);
+  }
+
+  Future<void> acceptSession(Map<String, dynamic> session,
+      {bool importGuest = false}) async {
+    await initialize();
+    if (session['token'] is! String ||
+        session['user'] is! Map ||
+        session['user']['id'] is! String ||
+        session['user']['username'] is! String) {
+      throw StateError('Invalid account session. Please sign in again.');
+    }
     // Persist only the session token in OS-protected storage, never the password.
     await secure.write(key: 'fitquest.session', value: jsonEncode(session));
     await _locked(() async {
-      final guest = scope == 'guest' && username != null
+      final guest = scope == 'guest' && importGuest
           ? Map<String, dynamic>.from(_values)
           : <String, dynamic>{};
       user = session['user'] as Map<String, dynamic>;
@@ -244,6 +256,7 @@ class OfflineStore extends ChangeNotifier {
       await request('/v2/auth/logout', body: {});
     } catch (_) {}
     await secure.delete(key: 'fitquest.session');
+    await secure.delete(key: 'fitquest.oauth.pending');
     await _locked(() async {
       user = null;
       _token = null;
