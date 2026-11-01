@@ -82,6 +82,39 @@ Local data is separated by account but uses unencrypted SharedPreferences. Secur
 storage protects session tokens. Plan a local-data encryption migration and a
 privacy policy before distributing sensitive health-data features publicly.
 
+## Custom fitness challenges
+
+Open **Quests → My fitness challenges** (Challenges tab) or **Community → Create
+a fitness challenge**. Choose Custom, Military-style test, CrossFit-style AMRAP
+or CrossFit-style for time. Set a name, dates, exercise protocols, equipment,
+scaling and optional pass thresholds. Every exercise uses reps, seconds, metres,
+kilograms or rounds with an explicit higher/lower scoring direction. Templates
+are personal training examples, not official military scoring standards.
+
+Challenges default to private. Select **My followers** to let people who follow
+the creator discover, join and view participant usernames/results. Followers
+discover challenges after refreshing their challenge list. No weights or routes
+are automatically included. Scoring rules are fixed once saved; create another
+challenge to change a protocol without mixing incompatible results.
+
+Log any tested exercise, leaving untested ones blank. Time accepts `mm:ss` or
+whole seconds. Prescribed and scaled attempts are ranked separately, one best
+completed result per participant per exercise, with ties sharing a rank. There is
+no invented overall score adding different units. Unfinished attempts need notes
+and appear in history but are excluded from rankings. Attempts can be deleted;
+offline deletion syncs later. Rankings are self-reported and show cached results
+offline (refresh to update); the server returns the latest 2,000 attempts.
+
+Definitions, joins and attempts use the durable account outbox. A guest can
+create and record private challenges without a connection; registration imports
+them. Following and joining are processed before result uploads in each sync
+batch. The server validates ownership, visibility, membership, dates, exercise
+IDs and numeric units. Invalid uploads stay local and are reported by sync.
+
+API routes: `GET /v2/challenges` lists personal and followed creators' shared
+challenges; `GET /v2/challenges/{id}` returns an accessible definition and results.
+Definitions and results remain isolated through the existing per-user state keys.
+
 ## Phone steps and sponsor placements
 
 Android uses TYPE_STEP_COUNTER and an optional health foreground service with an

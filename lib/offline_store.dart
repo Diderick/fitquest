@@ -84,7 +84,7 @@ class OfflineStore extends ChangeNotifier {
   }
 
   bool _syncable(String key) => RegExp(
-          r'^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|steps\.[\w.-]+|following/[\w-]+)$')
+          r'^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following/[\w-]+)$')
       .hasMatch(key);
   Future<void> _persist() async {
     final saved = await _prefs!.setString(
@@ -106,6 +106,7 @@ class OfflineStore extends ChangeNotifier {
   }
 
   Object? get(String key) => _values[key];
+  List<String> get keys => _values.keys.toList();
   Object? serverValue(String key) => (_remote[key] as Map?)?['value'];
   String? getString(String key) => _values[key] as String?;
   int? getInt(String key) => (_values[key] as num?)?.toInt();

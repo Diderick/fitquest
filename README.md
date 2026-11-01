@@ -18,6 +18,8 @@ FitQuest is a Flutter fitness-tracking prototype with Strava-inspired activity l
 - Count real phone sensor steps with permission; workout distance does not add estimated steps.
 - Save a starting weight now and add the next weigh-in later.
 - Preview quiet sponsor placements on Home and Community, with a free hide option.
+- Create military-style, CrossFit-style or custom fitness challenges, set exercise targets, and log results offline.
+- Share challenges with followers, join friends' tests, and compare per-exercise results in separate prescribed/scaled divisions.
 
 ## Run
 

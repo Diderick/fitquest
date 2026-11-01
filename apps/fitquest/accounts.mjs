@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
+import { challengeApi } from './challenge_api.mjs';
 const scrypt = promisify(scryptCallback);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const passwordHash = (password, salt) => scrypt(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
@@ -21,6 +22,7 @@ export function accounts(db, reply) {
       PRIMARY KEY(follower, following));
   `);
   const attempts = new Map();
+  const challenges = challengeApi(db, reply);
   const publicUser = user => ({ id: user.id, username: user.username });
   async function body(req) {
     if (!req.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('Expected JSON'), { status: 415 });
@@ -44,7 +46,7 @@ export function accounts(db, reply) {
   }
   const selectState = db.prepare('SELECT key,value,version FROM user_state WHERE user_id=?');
   const state = userId => Object.fromEntries(selectState.all(userId).map(row => [row.key, { value: JSON.parse(row.value), version: row.version }]));
-  const allowed = key => /^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|steps\.[\w.-]+|following\/[\w-]+)$/.test(key);
+  const allowed = key => /^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following\/[\w-]+)$/.test(key);
   function validateValue(key, value) {
     if (!allowed(key)) return false;
     if (key.startsWith('following/')) return typeof value === 'boolean';
@@ -105,8 +107,10 @@ export function accounts(db, reply) {
         db.exec('BEGIN IMMEDIATE');
         try {
           db.prepare('DELETE FROM sync_receipts WHERE created<?').run(Date.now() - 180 * 86400000);
-          for (const op of input.operations) {
+          const priority = key => key.startsWith('following/') ? 0 : key.startsWith('challenge.') ? 1 : key.startsWith('challenge_join.') ? 2 : key.startsWith('challenge_result.') ? 4 : 3;
+          for (const op of [...input.operations].sort((a, b) => priority(a.key) - priority(b.key))) {
             if (db.prepare('SELECT 1 FROM sync_receipts WHERE user_id=? AND op_id=?').get(session.id, op.id)) { acknowledged.push(op.id); continue; }
+            challenges.validate(op.key, op.value, session.id);
             const current = db.prepare('SELECT version,value FROM user_state WHERE user_id=? AND key=?').get(session.id, op.key);
             if ((current?.version ?? 0) !== op.base) { conflicts.push(op.key); continue; }
             const count = db.prepare('SELECT count(*) AS count FROM user_state WHERE user_id=?').get(session.id).count;
@@ -141,6 +145,7 @@ export function accounts(db, reply) {
         }).slice(0, 100);
         return reply(res, 200, { following, followers, posts }), true;
       }
+      if (challenges.route(req, res, url, session)) return true;
       reply(res, 404, { error: 'Not found' });
     } catch (error) {
       if (!res.headersSent) reply(res, error.status ?? 500, { error: error.status ? error.message : 'Server error' });

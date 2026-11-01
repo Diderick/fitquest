@@ -55,7 +55,22 @@ try {
   assert.equal(sync.state.bl_current, undefined);
   assert.equal(Object.keys((await request('/v2/sync', bob.token, { operations: [] })).state).length, 0);
   assert.equal((await request('/v2/social', bob.token)).followers[0].id, alice.user.id);
-  console.log('Live HTTPS account, login, private sync and following checks passed');
+  const challengeId = randomUUID();
+  const definition = { id: challengeId, title: 'Temporary fitness test', category: 'Military', instructions: 'Smoke test',
+    startDate: '2020-01-01', endDate: '2099-12-31', visibility: 'followers',
+    events: [{ id: 'pushups', name: 'Push-ups', instructions: '2 minutes', metric: 'reps', higherWins: true, target: 20 }] };
+  await request('/v2/sync', bob.token, { operations: [{ id: randomUUID(), key: `challenge.${challengeId}`, value: JSON.stringify(definition), base: 0 }] });
+  assert.ok((await request('/v2/challenges', alice.token)).challenges.some(c => c.id === challengeId));
+  const resultId = randomUUID();
+  await request('/v2/sync', alice.token, { operations: [
+    { id: randomUUID(), key: `challenge_join.${challengeId}`, value: true, base: 0 },
+    { id: randomUUID(), key: `challenge_result.${challengeId}.${resultId}`, base: 0,
+      value: JSON.stringify({ id: resultId, challengeId, date: new Date().toISOString().slice(0, 10), division: 'As prescribed', notes: '', completed: true, scores: { pushups: 25 } }) },
+  ] });
+  const board = await request(`/v2/challenges/${challengeId}`, bob.token);
+  assert.equal(board.results[0].userId, alice.user.id);
+  assert.equal(board.results[0].scores.pushups, 25);
+  console.log('Live HTTPS accounts, private sync, following, challenge creation, joining and results checks passed');
 } finally {
   if (process.env.FITQUEST_SMOKE_SSH === '1') {
     const output = execFileSync('ssh', ['-o', 'BatchMode=yes', 'ssh.northstarlabs.tech',

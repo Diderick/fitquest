@@ -85,6 +85,34 @@ test('authentication, validation, conflict detection and persistence', async () 
     assert.equal(social.bl_start, undefined);
     await sync(bob.token, [{ id: 'unfollow', key: `following/${alice.user.id}`, value: false, base: 1 }]);
     assert.equal((await (await api('/v2/social', bob.token)).json()).following.length, 0);
+    const definition = { id: 'military-test', title: 'Custom unit fitness test', category: 'Military', instructions: 'Personal practice protocol.',
+      startDate: '2026-11-01', endDate: '2026-12-01', visibility: 'followers',
+      events: [{ id: 'pushups', name: 'Push-ups', metric: 'reps', higherWins: true, target: 40, instructions: '2 minutes' },
+        { id: 'run', name: 'Run', metric: 'seconds', higherWins: false, target: 900, instructions: '2.4 km' }] };
+    const challengeOp = { id: 'create-challenge', key: 'challenge.military-test', value: JSON.stringify(definition), base: 0 };
+    assert.equal((await sync(alice.token, [challengeOp])).status, 200);
+    assert.equal((await (await api('/v2/challenges', bob.token)).json()).challenges.length, 0);
+    assert.equal((await api('/v2/challenges/military-test', bob.token)).status, 404);
+    const result = { id: 'attempt1', challengeId: definition.id, date: '2026-11-02', division: 'As prescribed', notes: '', completed: true, scores: { pushups: 45, run: 875 } };
+    const resultOp = { id: 'record-challenge-result', key: 'challenge_result.military-test.attempt1', value: JSON.stringify(result), base: 0 };
+    assert.equal((await sync(bob.token, [resultOp])).status, 403);
+    // Dependency ordering must work even if an offline result precedes follow/join in the batch.
+    assert.equal((await sync(bob.token, [resultOp,
+      { id: 'join-challenge', key: 'challenge_join.military-test', value: true, base: 0 },
+      { id: 'refollow', key: `following/${alice.user.id}`, value: true, base: 2 },
+    ])).status, 200);
+    assert.equal((await (await api('/v2/challenges', bob.token)).json()).challenges[0].id, definition.id);
+    const board = await (await api('/v2/challenges/military-test', alice.token)).json();
+    assert.equal(board.results[0].userId, bob.user.id);
+    assert.equal(board.results[0].scores.run, 875);
+    assert.equal((await sync(bob.token, [{ ...resultOp, id: 'bad-result', key: 'challenge_result.military-test.bad', value: JSON.stringify({ ...result, id: 'bad', scores: { pushups: -1 } }) }])).status, 400);
+    assert.equal((await sync(bob.token, [{ ...resultOp, id: 'bad-date', key: 'challenge_result.military-test.date', value: JSON.stringify({ ...result, id: 'date', date: '2026-12-02' }) }])).status, 400);
+    assert.equal((await sync(bob.token, [{ ...challengeOp, id: 'steal' }])).status, 409);
+    const privateChallenge = { ...definition, id: 'private-test', visibility: 'private' };
+    assert.equal((await sync(alice.token, [{ ...challengeOp, id: 'private', key: 'challenge.private-test', value: JSON.stringify(privateChallenge) }])).status, 200);
+    assert.equal((await api('/v2/challenges/private-test', bob.token)).status, 404);
+    assert.equal((await sync(bob.token, [{ id: 'delete-attempt', key: resultOp.key, value: null, base: 1 }])).status, 200);
+    assert.equal((await (await api('/v2/challenges/military-test', alice.token)).json()).results.length, 0);
     await stop(); await start();
     assert.equal((await (await sync(alice.token, [])).json()).state.bl_start.value, 95.5);
     await api('/v2/auth/logout', alice.token, {});

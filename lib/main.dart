@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'offline_store.dart';
 import 'account_ui.dart';
 import 'step_tracker.dart';
+import 'challenge_ui.dart';
 
 void main() => runApp(const FitQuestApp());
 
@@ -1899,6 +1900,15 @@ class _CommunityPageState extends State<CommunityPage> {
               withImage: _demoPosts[i].$3,
               baseLikes: _demoPosts[i].$4),
         const SectionTitle('Community challenges'),
+        AppCard(
+            child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('Create a fitness challenge'),
+                subtitle: const Text(
+                    'Military tests, CrossFit-style workouts and your own rules'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => openChallenges(context))),
         const SponsorPlacement(),
         for (final challenge in [
           ('Move 150 minutes', 'A week of movement, at your pace.'),
@@ -2272,6 +2282,14 @@ class _QuestsPageState extends State<QuestsPage> {
       Expanded(
         child: ListView(padding: pagePadding, children: [
           if (subTab == 1) ...[
+            AppCard(
+                child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.fitness_center),
+                    title: const Text('Custom fitness challenges'),
+                    subtitle: const Text(
+                        'Create a test, invite followers and record results'),
+                    onTap: () => openChallenges(context))),
             _BiggestLoserCard(
               onOpen: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => SubPage(
@@ -2282,6 +2300,14 @@ class _QuestsPageState extends State<QuestsPage> {
             ),
             dailyQuest,
           ] else ...[
+            AppCard(
+                child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.flag_outlined),
+                    title: const Text('My fitness challenges'),
+                    subtitle: const Text(
+                        'Create military, CrossFit-style or custom tests'),
+                    onTap: () => openChallenges(context))),
             dailyQuest,
             ...achievementCards(workouts),
           ],

@@ -23,11 +23,17 @@ String syncItemLabel(String key) =>
       'body_fat': 'Body fat',
       'ads_hidden': 'Sponsor preference',
     }[key] ??
-    (key.startsWith('nutrition')
-        ? 'Nutrition'
-        : key.startsWith('steps.')
-            ? 'Daily steps'
-            : 'Following');
+    (key.startsWith('challenge_result.')
+        ? 'Fitness test result'
+        : key.startsWith('challenge_join.')
+            ? 'Challenge participation'
+            : key.startsWith('challenge.')
+                ? 'Fitness challenge'
+                : key.startsWith('nutrition')
+                    ? 'Nutrition'
+                    : key.startsWith('steps.')
+                        ? 'Daily steps'
+                        : 'Following');
 
 String syncValueSummary(Object? value) {
   if (value == null) return 'Not recorded';
