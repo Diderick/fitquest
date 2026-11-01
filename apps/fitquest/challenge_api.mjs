@@ -45,7 +45,8 @@ export function challengeApi(db, reply) {
       const existing = find(input.id);
       if (existing && existing.ownerId !== userId) fail('This challenge ID is already in use.', 409);
       const own = db.prepare('SELECT value FROM user_state WHERE user_id=? AND key=?').get(userId, key);
-      if (own && JSON.stringify(unpack(own)) !== JSON.stringify(input)) fail('Create a new challenge to change saved scoring rules.');
+      const rules = value => { const { visibility, ...protocol } = value; return JSON.stringify(protocol); };
+      if (own && rules(unpack(own)) !== rules(input)) fail('Create a new challenge to change saved scoring rules.');
       return;
     }
     if (parts[0] !== 'challenge_result' || !identifier(parts[2]) || input.id !== parts[2] || input.challengeId !== parts[1]) fail('Invalid result ID.');

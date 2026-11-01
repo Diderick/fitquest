@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'offline_store.dart';
+import 'friend_links.dart';
 
 class SocialAuth extends ChangeNotifier {
   static final instance = SocialAuth();
@@ -14,6 +15,7 @@ class SocialAuth extends ChangeNotifier {
   String? message;
   Map<String, bool> providers = {'google': false, 'facebook': false};
   List<String> linked = [];
+  int importGeneration = 0;
   bool get supported =>
       !kIsWeb &&
       [TargetPlatform.android, TargetPlatform.iOS]
@@ -24,13 +26,17 @@ class SocialAuth extends ChangeNotifier {
     if (_subscription != null) return;
     try {
       _subscription = links.uriLinkStream
-          .listen((uri) => unawaited(complete(uri)), onError: (_) {});
+          .listen((uri) => unawaited(handleLink(uri)), onError: (_) {});
       final initial = await links.getInitialLink();
-      if (initial != null) await complete(initial);
+      if (initial != null) await handleLink(initial);
     } catch (_) {
       /* Email and offline use remain available on unsupported platforms. */
     }
   }
+
+  Future<void> handleLink(Uri uri) => uri.host == 'invite'
+      ? FriendLinkRouter.instance.receive(uri)
+      : complete(uri);
 
   Future<void> refresh() async {
     if (!supported) {
@@ -51,7 +57,7 @@ class SocialAuth extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> start(String provider) async {
+  Future<void> start(String provider, {bool importFriends = false}) async {
     if (waiting || !providers.containsKey(provider)) return;
     waiting = true;
     message = null;
@@ -68,12 +74,16 @@ class SocialAuth extends ChangeNotifier {
           value: jsonEncode({
             'verifier': verifier,
             'state': state,
+            'scope': store.scope,
             'expires': DateTime.now()
                 .add(const Duration(minutes: 10))
                 .millisecondsSinceEpoch,
           }));
-      final response = await store.request('/v2/oauth/$provider/start',
-          body: {'challenge': challenge, 'appState': state});
+      final response = await store.request('/v2/oauth/$provider/start', body: {
+        'challenge': challenge,
+        'appState': state,
+        'purpose': importFriends ? 'friends' : 'signin'
+      });
       final uri = Uri.parse(response['authorizationUrl'] as String);
       if (uri.scheme != 'https' ||
           !['accounts.google.com', 'www.facebook.com'].contains(uri.host)) {
@@ -116,11 +126,19 @@ class SocialAuth extends ChangeNotifier {
           (pending['expires'] as int) < DateTime.now().millisecondsSinceEpoch) {
         return;
       }
+      if (pending['scope'] != null && pending['scope'] != store.scope) {
+        message =
+            'The active account changed. Start the connection again for this account.';
+        await cancel();
+        return;
+      }
       if (uri.queryParameters['error'] != null) {
         message = switch (uri.queryParameters['error']) {
           'cancelled' => 'Sign-in was cancelled.',
           'link_required' =>
             'That identity or email belongs to an existing account. Sign in to that account first, then link the provider in Account & sync.',
+          'permission_required' =>
+            'The import needs provider permission. No new follows were created. You can retry or invite friends with a link.',
           _ => 'The provider could not verify sign-in. Please retry.',
         };
         await cancel();
@@ -138,7 +156,13 @@ class SocialAuth extends ChangeNotifier {
       await store.acceptSession(session,
           importGuest: session['created'] == true);
       await cancel();
-      message = 'Account connected.';
+      if (session['purpose'] == 'friends') {
+        importGeneration++;
+        message =
+            'Import complete. Review the suggested people before following them.';
+      } else {
+        message = 'Account connected.';
+      }
       await refresh();
     } catch (_) {
       message =

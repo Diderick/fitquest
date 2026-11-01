@@ -111,6 +111,11 @@ test('authentication, validation, conflict detection and persistence', async () 
     const privateChallenge = { ...definition, id: 'private-test', visibility: 'private' };
     assert.equal((await sync(alice.token, [{ ...challengeOp, id: 'private', key: 'challenge.private-test', value: JSON.stringify(privateChallenge) }])).status, 200);
     assert.equal((await api('/v2/challenges/private-test', bob.token)).status, 404);
+    assert.equal((await sync(alice.token, [{ id: 'share-private', key: 'challenge.private-test', value: JSON.stringify({ ...privateChallenge, visibility: 'followers' }), base: 1 }])).status, 200);
+    assert.equal((await api('/v2/challenges/private-test', bob.token)).status, 200);
+    assert.equal((await sync(alice.token, [{ id: 'change-protocol', key: 'challenge.private-test', value: JSON.stringify({ ...privateChallenge, title: 'Changed protocol', visibility: 'followers' }), base: 2 }])).status, 400);
+    assert.equal((await sync(alice.token, [{ id: 'hide-private', key: 'challenge.private-test', value: JSON.stringify(privateChallenge), base: 2 }])).status, 200);
+    assert.equal((await api('/v2/challenges/private-test', bob.token)).status, 404);
     assert.equal((await sync(bob.token, [{ id: 'delete-attempt', key: resultOp.key, value: null, base: 1 }])).status, 200);
     assert.equal((await (await api('/v2/challenges/military-test', alice.token)).json()).results.length, 0);
     await stop(); await start();

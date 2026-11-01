@@ -223,6 +223,15 @@ class ChallengeRepository {
         'challenge.${challenge.id}', jsonEncode(challenge.toJson()));
   }
 
+  Future<void> setVisibility(
+      FitnessChallenge challenge, String visibility) async {
+    if (!isOwner(challenge) || !['private', 'followers'].contains(visibility)) {
+      throw StateError('Only the creator can change sharing.');
+    }
+    await store.setString('challenge.${challenge.id}',
+        jsonEncode({...challenge.toJson(), 'visibility': visibility}));
+  }
+
   Future<void> join(String id, bool join) async {
     await store.setBool('challenge_join.$id', join);
   }

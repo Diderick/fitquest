@@ -13,7 +13,9 @@ function cleanup(users) {
     for (const user of users) {
       const row = db.prepare('SELECT username,email FROM users WHERE id=?').get(user.id);
       assert.ok(row.username.startsWith('smoke_') && row.email.endsWith('@example.invalid'));
-      for (const table of ['sessions', 'user_state', 'sync_receipts']) db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(user.id);
+      for (const table of ['sessions', 'user_state', 'sync_receipts', 'friend_invites', 'social_imports', 'oauth_identities', 'oauth_grants']) db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(user.id);
+      db.prepare('DELETE FROM social_suggestions WHERE user_id=? OR target_id=?').run(user.id, user.id);
+      db.prepare('DELETE FROM oauth_flows WHERE link_user=?').run(user.id);
       db.prepare('DELETE FROM follows WHERE follower=? OR following=?').run(user.id, user.id);
       db.prepare('DELETE FROM users WHERE id=?').run(user.id);
     }
@@ -70,7 +72,17 @@ try {
   const board = await request(`/v2/challenges/${challengeId}`, bob.token);
   assert.equal(board.results[0].userId, alice.user.id);
   assert.equal(board.results[0].scores.pushups, 25);
-  console.log('Live HTTPS accounts, private sync, following, challenge creation, joining and results checks passed');
+  const invitation = await request('/v2/friends/invite', bob.token, {});
+  const invitationInfo = await request(`/v2/friends/invites/${invitation.code}?challenge=${challengeId}`, alice.token);
+  assert.equal(invitationInfo.person.id, bob.user.id);
+  assert.equal(invitationInfo.challenge.id, challengeId);
+  assert.equal(invitationInfo.person.email, undefined);
+  const landing = await fetch(`${base}/join/${invitation.code}?challenge=${challengeId}`, { signal: AbortSignal.timeout(20000) });
+  assert.equal(landing.status, 200);
+  assert.ok((await landing.text()).includes('fitquest-auth://invite?'));
+  assert.deepEqual((await request('/v2/friends/suggestions', alice.token)).people, []);
+  await request('/v2/sync', bob.token, { operations: [{ id: randomUUID(), key: 'friend_discovery', value: true, base: 0 }] });
+  console.log('Live HTTPS account, sync, following, challenge, invitation landing and follow/join lookup checks passed');
 } finally {
   if (process.env.FITQUEST_SMOKE_SSH === '1') {
     const output = execFileSync('ssh', ['-o', 'BatchMode=yes', 'ssh.northstarlabs.tech',

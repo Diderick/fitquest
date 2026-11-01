@@ -83,6 +83,11 @@ mutual follows appear as friends. Community posts are shared with followers.
 Weight, routes and nutrition are not included in social responses. Cached people
 and follow choices work offline; finding new people needs a connection.
 
+Provider imports can match discoverable friends through explicit consent. Emails
+are used internally for verified Google matching, never returned in suggestions.
+Invitation links support explicit follow-and-join for challenges. See
+[friend discovery](FRIENDS_SETUP.md).
+
 Local data is separated by account but uses unencrypted SharedPreferences. Secure
 storage protects session tokens. Plan a local-data encryption migration and a
 privacy policy before distributing sensitive health-data features publicly.
@@ -100,7 +105,8 @@ Challenges default to private. Select **My followers** to let people who follow
 the creator discover, join and view participant usernames/results. Followers
 discover challenges after refreshing their challenge list. No weights or routes
 are automatically included. Scoring rules are fixed once saved; create another
-challenge to change a protocol without mixing incompatible results.
+challenge to change a protocol without mixing incompatible results. Creators can
+change sharing between private and followers and invite friends to join.
 
 Log any tested exercise, leaving untested ones blank. Time accepts `mm:ss` or
 whole seconds. Prescribed and scaled attempts are ranked separately, one best

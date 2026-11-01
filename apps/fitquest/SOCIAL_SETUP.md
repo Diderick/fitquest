@@ -4,6 +4,10 @@ Activity sharing is available without provider credentials. Google and Facebook
 sign-in are implemented but disabled until real registrations are configured.
 No provider secret or shared API credential is compiled into the mobile app.
 
+See [friend discovery setup](FRIENDS_SETUP.md) for opt-in provider imports,
+additional permissions and invitation-based follow/join. Ordinary sign-in keeps
+minimal scopes; contacts/friend-list permission is requested only during imports.
+
 ## Activate sign-in
 
 Add the following values to **the server's** `/home/northstar/apps/fitquest/.env`,

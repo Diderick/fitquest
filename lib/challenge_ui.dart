@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'challenges.dart';
 import 'offline_store.dart';
+import 'friend_links.dart';
 
 String _day(DateTime date) => date.toIso8601String().substring(0, 10);
 void openChallenges(BuildContext context) => Navigator.push(
@@ -432,7 +433,9 @@ class _ChallengeDetailState extends State<ChallengeDetail> {
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: store,
       builder: (context, _) {
-        final challenge = widget.challenge;
+        final challenge =
+            repo.mine.where((c) => c.id == widget.challenge.id).firstOrNull ??
+                widget.challenge;
         final own = repo.isOwner(challenge);
         final joined = repo.joined(challenge.id);
         final local = repo.results(challenge.id);
@@ -470,6 +473,25 @@ class _ChallengeDetailState extends State<ChallengeDetail> {
               Text(challenge.visibility == 'private'
                   ? 'Private challenge'
                   : 'Shared with creator’s followers · self-reported results'),
+              if (own) ...[
+                SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Share with my followers'),
+                    subtitle: const Text(
+                        'Sharing can change. Exercise protocols and scoring rules stay fixed.'),
+                    value: challenge.visibility == 'followers',
+                    onChanged: (value) => repo.setVisibility(
+                        challenge, value ? 'followers' : 'private')),
+                if (challenge.visibility == 'followers')
+                  Builder(
+                      builder: (context) => OutlinedButton.icon(
+                          onPressed: () => shareFriendInvitation(context,
+                              challengeId: challenge.id,
+                              challengeTitle: challenge.title),
+                          icon: const Icon(Icons.person_add_alt_1),
+                          label:
+                              const Text('Invite friends to this challenge'))),
+              ],
               if (challenge.instructions.isNotEmpty)
                 Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),

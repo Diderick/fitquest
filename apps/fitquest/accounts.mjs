@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, cre
 import { promisify } from 'node:util';
 import { challengeApi } from './challenge_api.mjs';
 import { oauth } from './oauth.mjs';
+import { socialFriends } from './social_friends.mjs';
 const scrypt = promisify(scryptCallback);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const passwordHash = (password, salt) => scrypt(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
@@ -23,6 +24,7 @@ export function accounts(db, reply) {
       PRIMARY KEY(follower, following));
   `);
   const attempts = new Map();
+  const friends = socialFriends(db, reply);
   const challenges = challengeApi(db, reply);
   const publicUser = user => ({ id: user.id, username: user.username });
   function createSession(user) {
@@ -56,12 +58,12 @@ export function accounts(db, reply) {
     attempts.set(key, entry);
   }
   const selectState = db.prepare('SELECT key,value,version FROM user_state WHERE user_id=?');
-  const oauthRoute = oauth(db, reply, { body, rateLimit, sessionFor, createSession });
+  const oauthRoute = oauth(db, reply, { body, rateLimit, sessionFor, createSession, friends });
   const state = userId => Object.fromEntries(selectState.all(userId).map(row => [row.key, { value: JSON.parse(row.value), version: row.version }]));
-  const allowed = key => /^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following\/[\w-]+)$/.test(key);
+  const allowed = key => /^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|friend_discovery|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following\/[\w-]+)$/.test(key);
   function validateValue(key, value) {
     if (!allowed(key)) return false;
-    if (key.startsWith('following/')) return typeof value === 'boolean';
+    if (key.startsWith('following/') || key === 'friend_discovery') return typeof value === 'boolean';
     if (['bl_start', 'bl_current', 'body_fat'].includes(key)) return value === null || (typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 500);
     return value === null || typeof value === 'string' || typeof value === 'boolean'
       || (typeof value === 'number' && Number.isFinite(value))
@@ -69,6 +71,7 @@ export function accounts(db, reply) {
   }
   return async function route(req, res) {
     const url = new URL(req.url, 'http://localhost');
+    if (friends.publicRoute(req, res, url)) return true;
     if (!url.pathname.startsWith('/v2/')) return false;
     try {
       if (await oauthRoute(req, res, url)) return true;
@@ -103,6 +106,7 @@ export function accounts(db, reply) {
       const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '';
       const session = db.prepare('SELECT users.* FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires>?').get(hash(bearer), Date.now());
       if (!session) return reply(res, 401, { error: 'Sign in again to sync. Offline data is safe on this device.' }), true;
+      if (await friends.route(req, res, url, session, body)) return true;
       if (url.pathname === '/v2/auth/logout' && req.method === 'POST') {
         db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash(bearer));
         return reply(res, 200, { ok: true }), true;

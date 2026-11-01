@@ -3,7 +3,7 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const pkce = value => createHash('sha256').update(value).digest('base64url');
 const random = () => randomBytes(32).toString('base64url');
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
-export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, fetcher = fetch, env = process.env }) {
+export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, friends, fetcher = fetch, env = process.env }) {
   db.exec(`CREATE TABLE IF NOT EXISTS oauth_identities (
     provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id),
     PRIMARY KEY(provider,subject), UNIQUE(provider,user_id));
@@ -13,6 +13,15 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
     CREATE TABLE IF NOT EXISTS oauth_grants (
     code_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, challenge TEXT NOT NULL, app_state TEXT NOT NULL,
     created_user INTEGER NOT NULL, expires INTEGER NOT NULL);`);
+  for (const [table, column, definition] of [
+    ['oauth_identities', 'verified_email', 'TEXT'],
+    ['oauth_flows', 'purpose', "TEXT NOT NULL DEFAULT 'signin'"],
+    ['oauth_grants', 'purpose', "TEXT NOT NULL DEFAULT 'signin'"],
+    ['oauth_grants', 'provider', "TEXT NOT NULL DEFAULT ''"],
+  ]) {
+    if (!db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS oauth_verified_email ON oauth_identities(provider,verified_email)');
   const base = env.OAUTH_REDIRECT_BASE ?? 'https://fitquest-api.northstarlabs.tech';
   if (!/^https:\/\/[^/?#]+$/.test(base)) throw new Error('OAUTH_REDIRECT_BASE must be an HTTPS origin');
   const providers = {
@@ -25,7 +34,7 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
   let keysExpire = 0;
   async function json(url, options = {}) {
     const response = await fetcher(url, { ...options, signal: AbortSignal.timeout(15000) });
-    if (!response.ok) fail('Provider authentication failed. Please try again.', 502);
+    if (!response.ok) fail(response.status === 403 ? 'Provider permission is needed for this import.' : 'Provider authentication failed. Please try again.', response.status === 403 ? 403 : 502);
     return response.json();
   }
   async function googleIdentity(code, flow) {
@@ -52,7 +61,7 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
       || claims.aud !== env.GOOGLE_CLIENT_ID || (claims.azp && claims.azp !== env.GOOGLE_CLIENT_ID)
       || !Number.isFinite(claims.exp) || claims.exp <= now || !Number.isFinite(claims.iat) || claims.iat > now + 60
       || claims.nonce !== flow.nonce || typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 255) fail('Google identity expired or mismatched.', 401);
-    return { subject: claims.sub, email: claims.email_verified === true ? claims.email : null, name: claims.name };
+    return { subject: claims.sub, email: claims.email_verified === true ? claims.email : null, name: claims.name, accessToken: tokens.access_token };
   }
   async function facebookIdentity(code) {
     const tokens = await json(`${graph}/oauth/access_token`, { method: 'POST',
@@ -74,7 +83,7 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
       { headers: { Authorization: `Bearer ${tokens.access_token}` } });
     if (String(profile.id) !== String(data.user_id)) fail('Invalid Facebook identity.', 401);
     // Facebook email is not used to silently link an existing password account.
-    return { subject: String(profile.id), email: profile.email, name: profile.name };
+    return { subject: String(profile.id), email: profile.email, name: profile.name, accessToken: tokens.access_token };
   }
   function resolveUser(provider, identity, linkUser) {
     const linked = db.prepare('SELECT user_id FROM oauth_identities WHERE provider=? AND subject=?').get(provider, identity.subject);
@@ -85,7 +94,7 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
     if (linkUser) {
       const existing = db.prepare('SELECT 1 FROM oauth_identities WHERE provider=? AND user_id=?').get(provider, linkUser);
       if (existing) fail('This FitQuest account already has a different identity linked for this provider.', 409);
-      db.prepare('INSERT INTO oauth_identities VALUES (?,?,?)').run(provider, identity.subject, linkUser);
+      db.prepare('INSERT INTO oauth_identities(provider,subject,user_id) VALUES (?,?,?)').run(provider, identity.subject, linkUser);
       return { id: linkUser, created: false };
     }
     const email = typeof identity.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identity.email) && identity.email.length <= 254
@@ -94,7 +103,7 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
     const id = randomUUID();
     const username = `athlete_${randomBytes(8).toString('hex')}`;
     db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?)').run(id, email, username, randomBytes(16).toString('hex'), randomBytes(64).toString('hex'), Date.now());
-    db.prepare('INSERT INTO oauth_identities VALUES (?,?,?)').run(provider, identity.subject, id);
+    db.prepare('INSERT INTO oauth_identities(provider,subject,user_id) VALUES (?,?,?)').run(provider, identity.subject, id);
     return { id, created: true };
   }
   function redirect(res, values) {
@@ -120,7 +129,7 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
         db.prepare('DELETE FROM oauth_grants WHERE code_hash=?').run(digest(input.code));
         const session = createSession(db.prepare('SELECT * FROM users WHERE id=?').get(grant.user_id));
         db.exec('COMMIT');
-        reply(res, 200, { ...session, created: Boolean(grant.created_user) });
+        reply(res, 200, { ...session, created: Boolean(grant.created_user), purpose: grant.purpose, provider: grant.provider });
       } catch (error) { db.exec('ROLLBACK'); throw error; }
       return true;
     }
@@ -134,16 +143,19 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
       if (!input || !/^[A-Za-z0-9_-]{43}$/.test(input.challenge ?? '') || !/^[a-f0-9]{48}$/.test(input.appState ?? '')) fail('Invalid sign-in request.');
       const user = sessionFor(req);
       if (req.headers.authorization && !user) fail('Sign in again before linking a provider.', 401);
+      const purpose = input.purpose ?? 'signin';
+      if (!['signin', 'friends'].includes(purpose)) fail('Invalid connection purpose.');
+      if (purpose === 'friends' && (!user || !friends)) fail('Sign in to FitQuest before importing friends.', 401);
       const state = random(), nonce = random();
       db.prepare('DELETE FROM oauth_flows WHERE expires<?').run(Date.now());
       db.prepare('DELETE FROM oauth_grants WHERE expires<?').run(Date.now());
-      db.prepare('INSERT INTO oauth_flows VALUES (?,?,?,?,?,?,?)').run(digest(state), provider, input.challenge, input.appState, nonce, user?.id ?? null, Date.now() + 600000);
+      db.prepare('INSERT INTO oauth_flows(state_hash,provider,challenge,app_state,nonce,link_user,expires,purpose) VALUES (?,?,?,?,?,?,?,?)').run(digest(state), provider, input.challenge, input.appState, nonce, user?.id ?? null, Date.now() + 600000, purpose);
       const authorization = new URL(provider === 'google' ? 'https://accounts.google.com/o/oauth2/v2/auth' : `https://www.facebook.com/${env.FACEBOOK_GRAPH_VERSION}/dialog/oauth`);
       authorization.search = new URLSearchParams({
         client_id: provider === 'google' ? env.GOOGLE_CLIENT_ID : env.FACEBOOK_APP_ID,
         redirect_uri: callback(provider), response_type: 'code', state,
-        scope: provider === 'google' ? 'openid email' : 'public_profile,email',
-        ...(provider === 'google' ? { nonce, prompt: 'select_account' } : {}),
+        scope: provider === 'google' ? purpose === 'friends' ? 'openid email https://www.googleapis.com/auth/contacts.readonly' : 'openid email' : purpose === 'friends' ? 'public_profile,email,user_friends' : 'public_profile,email',
+        ...(provider === 'google' ? { nonce, prompt: purpose === 'friends' ? 'consent select_account' : 'select_account' } : purpose === 'friends' ? { auth_type: 'rerequest' } : {}),
       });
       reply(res, 200, { authorizationUrl: authorization.toString() }); return true;
     }
@@ -157,16 +169,22 @@ export function oauth(db, reply, { body, rateLimit, sessionFor, createSession, f
         const code = url.searchParams.get('code');
         if (!code || code.length > 10000) fail('Missing provider response.');
         const identity = provider === 'google' ? await googleIdentity(code, flow) : await facebookIdentity(code);
+        const imported = flow.purpose === 'friends' ? await friends.collect(provider, identity.accessToken, json, graph,
+          provider === 'facebook' ? createHmac('sha256', env.FACEBOOK_APP_SECRET).update(identity.accessToken).digest('hex') : '') : null;
         db.exec('BEGIN IMMEDIATE');
         try {
           const user = resolveUser(provider, identity, flow.link_user);
+          if (provider === 'google') {
+            db.prepare("UPDATE oauth_identities SET verified_email=? WHERE provider='google' AND subject=?").run(typeof identity.email === 'string' ? identity.email.trim().toLowerCase() : null, identity.subject);
+          }
+          if (imported) friends.saveMatches(user.id, provider, imported);
           const grant = random();
-          db.prepare('INSERT INTO oauth_grants VALUES (?,?,?,?,?,?)').run(digest(grant), user.id, flow.challenge, flow.app_state, user.created ? 1 : 0, Date.now() + 120000);
+          db.prepare('INSERT INTO oauth_grants(code_hash,user_id,challenge,app_state,created_user,expires,purpose,provider) VALUES (?,?,?,?,?,?,?,?)').run(digest(grant), user.id, flow.challenge, flow.app_state, user.created ? 1 : 0, Date.now() + 120000, flow.purpose, provider);
           db.exec('COMMIT');
           redirect(res, { code: grant, state: flow.app_state });
         } catch (error) { db.exec('ROLLBACK'); throw error; }
       } catch (error) {
-        redirect(res, { state: flow.app_state, error: error.status === 409 ? 'link_required' : 'provider_failed' });
+        redirect(res, { state: flow.app_state, error: error.status === 409 ? 'link_required' : error.status === 403 ? 'permission_required' : 'provider_failed' });
       }
       return true;
     }

@@ -84,7 +84,7 @@ class OfflineStore extends ChangeNotifier {
   }
 
   bool _syncable(String key) => RegExp(
-          r'^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following/[\w-]+)$')
+          r'^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|friend_discovery|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following/[\w-]+)$')
       .hasMatch(key);
   Future<void> _persist() async {
     final saved = await _prefs!.setString(
@@ -125,10 +125,14 @@ class OfflineStore extends ChangeNotifier {
     return putAll({key: value});
   }
 
-  Future<bool> putAll(Map<String, Object?> changes) async {
+  Future<bool> putAll(Map<String, Object?> changes,
+      {String? expectedScope}) async {
     await initialize();
     var changed = false;
     await _locked(() async {
+      if (expectedScope != null && expectedScope != scope) {
+        throw StateError('The active account changed. Please try again.');
+      }
       final previous = Map<String, dynamic>.from(_values);
       final previousOutbox =
           _outbox.map((op) => Map<String, dynamic>.from(op)).toList();

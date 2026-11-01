@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'offline_store.dart';
 import 'step_tracker.dart';
 import 'social_auth.dart';
+import 'friend_discovery.dart';
 
 String jsonEncodeSocial(Map<String, dynamic> value) => jsonEncode(value);
 Map<String, dynamic> decodeSocial(String value) =>
@@ -286,6 +287,7 @@ class FriendsPage extends StatefulWidget {
 }
 
 class _FriendsPageState extends State<FriendsPage> {
+  String activeScope = '';
   final query = TextEditingController();
   List<Map<String, dynamic>> people = [],
       following = [],
@@ -297,27 +299,48 @@ class _FriendsPageState extends State<FriendsPage> {
   @override
   void initState() {
     super.initState();
+    activeScope = store.scope;
+    store.addListener(onScopeChanged);
     unawaited(load());
   }
 
   @override
   void dispose() {
+    store.removeListener(onScopeChanged);
     query.dispose();
     super.dispose();
+  }
+
+  void onScopeChanged() {
+    if (activeScope != store.scope) {
+      activeScope = store.scope;
+      setState(() {
+        following = [];
+        followers = [];
+        posts = [];
+        people = [];
+        query.clear();
+      });
+      unawaited(load());
+    }
   }
 
   List<Map<String, dynamic>> rows(Object? value) => (value as List? ?? [])
       .map((row) => Map<String, dynamic>.from(row as Map))
       .toList();
   Future<void> load() async {
+    final scope = store.scope;
     final cache = store.getString('_social_cache');
     if (cache != null) applyCache(cache);
     if (!store.signedIn) return;
     try {
       final data = await store.request('/v2/social');
+      if (scope != store.scope) return;
+      await rememberFriends(store,
+          [...rows(data['following']), ...rows(data['followers'])], scope);
       final raw = jsonEncodeSocial(data);
-      await store.setString('_social_cache', raw);
-      if (mounted) applyCache(raw);
+      await store.putAll({'_social_cache': raw}, expectedScope: scope);
+      if (mounted && scope == store.scope) applyCache(raw);
     } catch (_) {
       if (mounted) {
         setState(() => message =
@@ -343,17 +366,20 @@ class _FriendsPageState extends State<FriendsPage> {
       message = null;
     });
     try {
+      final scope = store.scope;
       final result = await store.request(
           '/v2/people?q=${Uri.encodeQueryComponent(query.text.trim())}');
+      if (scope != store.scope) return;
+      await rememberFriends(store, rows(result['people']), scope);
       if (mounted) setState(() => people = rows(result['people']));
-      await store.setString(
-          '_social_cache',
-          jsonEncodeSocial({
-            'following': following,
-            'followers': followers,
-            'posts': posts,
-            'people': people
-          }));
+      await store.putAll({
+        '_social_cache': jsonEncodeSocial({
+          'following': following,
+          'followers': followers,
+          'posts': posts,
+          'people': people
+        })
+      }, expectedScope: scope);
     } catch (_) {
       if (mounted) {
         setState(() => message =
@@ -385,6 +411,7 @@ class _FriendsPageState extends State<FriendsPage> {
                               builder: (_) => const AccountPage())),
                       child: const Text('Account & sync')),
                 ] else ...[
+                  SocialFriendImportPanel(key: ValueKey(store.scope)),
                   const Text(
                       'Search by public username. Following is one-way; follow each other to become friends.'),
                   TextField(
@@ -398,7 +425,16 @@ class _FriendsPageState extends State<FriendsPage> {
                   if (message != null) Text(message!),
                   for (final group in [
                     ('Search results', people),
-                    ('Following', following),
+                    (
+                      'Following',
+                      {
+                        for (final person in [
+                          ...following,
+                          ...knownFriends(store)
+                        ])
+                          person['id']: person
+                      }.values.where(isFollowing).toList()
+                    ),
                     ('Followers', followers)
                   ]) ...[
                     Padding(

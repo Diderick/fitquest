@@ -11,6 +11,7 @@ import 'step_tracker.dart';
 import 'challenge_ui.dart';
 import 'activity_sharing.dart';
 import 'social_auth.dart';
+import 'friend_links.dart';
 
 void main() => runApp(const FitQuestApp());
 
@@ -420,12 +421,15 @@ class _FitQuestAppState extends State<FitQuestApp> with WidgetsBindingObserver {
   final ActivityRepository _activities = LocalActivityRepository();
   int weeklyGoalMinutes = 180;
   bool _isRecording = false;
+  bool _openingInvitation = false;
   final List<Workout> workouts = [];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    FriendLinkRouter.instance.addListener(_openInvitation);
+    unawaited(FriendLinkRouter.instance.restore());
     unawaited(SocialAuth.instance.initialize());
     OfflineStore.instance.addListener(_refreshStore);
     StepTracker.instance.addListener(_refreshSteps);
@@ -450,6 +454,25 @@ class _FitQuestAppState extends State<FitQuestApp> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  void _openInvitation() {
+    if (!mounted ||
+        _openingInvitation ||
+        FriendLinkRouter.instance.pending == null) {
+      return;
+    }
+    _openingInvitation = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _openingInvitation = false;
+      if (!mounted) return;
+      final invitation = FriendLinkRouter.instance.takePending();
+      if (invitation == null) return;
+      unawaited(_navigatorKey.currentState!
+          .push<void>(MaterialPageRoute(
+              builder: (_) => FriendInvitePage(invitation: invitation)))
+          .whenComplete(() => FriendLinkRouter.instance.finish(invitation)));
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -461,6 +484,7 @@ class _FitQuestAppState extends State<FitQuestApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    FriendLinkRouter.instance.removeListener(_openInvitation);
     OfflineStore.instance.removeListener(_refreshStore);
     StepTracker.instance.removeListener(_refreshSteps);
     OfflineStore.instance.stop();

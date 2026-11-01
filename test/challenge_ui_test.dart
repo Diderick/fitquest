@@ -31,6 +31,9 @@ void main() {
     expect(find.text('Weekend fitness test'), findsOneWidget);
     await tester.tap(find.text('Weekend fitness test'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Log test result'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Log test result'));
     await tester.pumpAndSettle();
     await tester.enterText(
