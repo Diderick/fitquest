@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const FitQuestApp());
@@ -125,6 +126,71 @@ class LocalActivityRepository implements ActivityRepository {
       jsonEncode(workouts.map((workout) => workout.toJson()).toList()),
     );
     if (!saved) throw StateError('Could not save activities on this device.');
+  }
+}
+
+const fitquestApiUrl = String.fromEnvironment('FITQUEST_API_URL');
+const fitquestApiToken = String.fromEnvironment('FITQUEST_API_TOKEN');
+
+/// A single-user server repository. Revision checks prevent silent overwrites.
+class RemoteActivityRepository implements ActivityRepository {
+  final Uri endpoint;
+  final String token;
+  final http.Client client;
+  int? _revision;
+
+  RemoteActivityRepository(String baseUrl, this.token, {http.Client? client})
+      : endpoint = Uri.parse(
+            '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/activities'),
+        client = client ?? http.Client() {
+    if (endpoint.scheme != 'https' || endpoint.host.isEmpty || token.isEmpty) {
+      throw ArgumentError('Configure an HTTPS API URL and an API token.');
+    }
+  }
+
+  Map<String, String> get _headers => {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      };
+
+  Map<String, dynamic> _decode(http.Response response) {
+    if (response.statusCode == 409) {
+      throw StateError(
+          'Activities changed on another device. Restart the app before saving.');
+    }
+    if (response.statusCode != 200) {
+      throw StateError('Activity server returned ${response.statusCode}.');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<List<Workout>> load() async {
+    final body = _decode(await client
+        .get(endpoint, headers: _headers)
+        .timeout(const Duration(seconds: 20)));
+    final workouts = (body['workouts'] as List)
+        .map((item) => Workout.fromJson(item as Map<String, dynamic>))
+        .toList();
+    _revision = body['revision'] as int;
+    return workouts;
+  }
+
+  @override
+  Future<void> save(List<Workout> workouts) async {
+    if (_revision == null) {
+      throw StateError(
+          'Activities have not loaded. Restart the app to reconnect.');
+    }
+    final body = _decode(await client
+        .put(endpoint,
+            headers: _headers,
+            body: jsonEncode({
+              'revision': _revision,
+              'workouts': workouts.map((w) => w.toJson()).toList()
+            }))
+        .timeout(const Duration(seconds: 20)));
+    _revision = body['revision'] as int;
   }
 }
 
@@ -360,10 +426,12 @@ class _FitQuestAppState extends State<FitQuestApp> {
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   ThemeMode mode = ThemeMode.dark;
   int tab = 0;
-  final ActivityRepository _activities = LocalActivityRepository();
+  final ActivityRepository _activities = fitquestApiUrl.isEmpty
+      ? LocalActivityRepository()
+      : RemoteActivityRepository(fitquestApiUrl, fitquestApiToken);
   int weeklyGoalMinutes = 180;
   bool _isRecording = false;
-  final List<Workout> workouts = _demoWorkouts();
+  final List<Workout> workouts = fitquestApiUrl.isEmpty ? _demoWorkouts() : [];
 
   static List<Workout> _demoWorkouts() {
     final now = DateTime.now();
@@ -2814,7 +2882,9 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const SizedBox(height: 4),
           Text(
-              'Activities are stored locally on this device. Social accounts, synchronization, and connected devices need a backend.',
+              fitquestApiUrl.isEmpty
+                  ? 'Activities are stored locally on this device. Social accounts and connected devices need a backend.'
+                  : 'Activities are saved to your FitQuest server. Goals, plans, nutrition, and community features stay on this device.',
               style: TextStyle(color: mutedOf(context), fontSize: 12)),
         ]),
       ),
@@ -3255,7 +3325,9 @@ class _GpsRecorderState extends State<GpsRecorder> {
                         starting ? 'Connecting to GPS…' : 'Start recording')),
               const SizedBox(height: 6),
               Text(
-                  'GPS runs only while this screen is open. Location history is saved with the activity on this device.',
+                  fitquestApiUrl.isEmpty
+                      ? 'GPS runs only while this screen is open. Location history is saved with the activity on this device.'
+                      : 'GPS runs only while this screen is open. Saving an activity uploads its location history to your FitQuest server.',
                   style: TextStyle(color: mutedOf(context), fontSize: 12)),
             ]),
       );

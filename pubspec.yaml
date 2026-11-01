@@ -8,6 +8,7 @@ dependencies:
   flutter:
     sdk: flutter
   geolocator: ^14.0.2
+  http: ^1.2.2
   shared_preferences: ^2.3.2
 dev_dependencies:
   flutter_test:

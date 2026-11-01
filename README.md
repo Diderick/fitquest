@@ -33,6 +33,6 @@ GPS recording asks for location permission when started and works only while the
 
 ## Prototype limitations
 
-The app has an API-ready `ActivityRepository` boundary and a local implementation, but it does not connect to a server. Accounts, cross-device synchronization, live clubs and challenges, coach services, connected wearables, and real social sharing need a backend. Community demo posts and leaderboard competitors are fictional.
+Activity storage can connect to the authenticated FitQuest backend; see [backend setup](apps/fitquest/README.md) for deployment and Flutter build configuration. Builds without API configuration retain local storage. Accounts, live clubs and challenges, coach services, connected wearables, and real social sharing still need backend support. Community demo posts and leaderboard competitors are fictional.
 
 Workout, route, nutrition, post, goal, and plan data is stored locally using `shared_preferences` and is not encrypted. Avoid using this prototype for sensitive health data without secure storage, a privacy policy, and an appropriate backend.
