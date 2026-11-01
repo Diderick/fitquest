@@ -84,7 +84,7 @@ class OfflineStore extends ChangeNotifier {
   }
 
   bool _syncable(String key) => RegExp(
-          r'^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|friend_discovery|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following/[\w-]+)$')
+          r'^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|profile_gender|profile_photo_v1|ads_hidden|friend_discovery|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following/[\w-]+)$')
       .hasMatch(key);
   Future<void> _persist() async {
     final saved = await _prefs!.setString(
@@ -137,7 +137,10 @@ class OfflineStore extends ChangeNotifier {
       final previousOutbox =
           _outbox.map((op) => Map<String, dynamic>.from(op)).toList();
       for (final entry in changes.entries) {
-        if (jsonEncode(_values[entry.key]) == jsonEncode(entry.value)) continue;
+        if (_values.containsKey(entry.key) &&
+            jsonEncode(_values[entry.key]) == jsonEncode(entry.value)) {
+          continue;
+        }
         changed = true;
         _values[entry.key] = entry.value;
         if (_syncable(entry.key)) {

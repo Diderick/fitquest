@@ -10,7 +10,7 @@ FitQuest is a Flutter fitness-tracking prototype with Strava-inspired activity l
 - Review saved activities, weekly distance and time, longest recorded distance, and activity streaks.
 - Set a weekly activity-time goal.
 - Choose from local starter and goal-based training plans (weight loss, strength, and swim endurance) and log sessions.
-- Plan meals and record calories in the Nutrition tab with a daily target and quick-add entries.
+- Record food and drinks in Nutrition with portions, calories, dates, times and a daily allowance that includes estimated activity credit.
 - Write local community posts, join sample challenges, and react to feed posts.
 - Keep activity data, weekly goals, plans, nutrition entries, posts, challenge membership, and reactions on the device.
 - Create an account, find friends by username, and follow their community posts.
@@ -23,6 +23,8 @@ FitQuest is a Flutter fitness-tracking prototype with Strava-inspired activity l
 - Share an activity as an image card or text through the phone's share sheet, or post its summary to the FitQuest feed. Notes and route sketches default off.
 - Google/Facebook sign-in and account linking are prepared; activation needs [provider registration](apps/fitquest/SOCIAL_SETUP.md).
 - Review opt-in social matches and follow selected people, or share invitation links with explicit follow-and-join actions. [Provider import setup](apps/fitquest/FRIENDS_SETUP.md) needs extra permissions.
+- Add a private profile photo and select Male, Female or Other; both save offline and sync to your account.
+- Log food and drinks with portions, calories, dates and times. Daily allowance adds that date's estimated activity calories to its base goal.
 
 ## Run
 

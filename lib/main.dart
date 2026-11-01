@@ -12,6 +12,9 @@ import 'challenge_ui.dart';
 import 'activity_sharing.dart';
 import 'social_auth.dart';
 import 'friend_links.dart';
+import 'nutrition_log.dart';
+import 'nutrition_page.dart';
+import 'profile_identity.dart';
 
 void main() => runApp(const FitQuestApp());
 
@@ -436,6 +439,7 @@ class _FitQuestAppState extends State<FitQuestApp> with WidgetsBindingObserver {
     OfflineStore.getInstance().then((store) {
       if (mounted) {
         store.start();
+        unawaited(ProfilePhotoService.recover());
         _refreshStore();
       }
     });
@@ -2088,201 +2092,18 @@ class _CommunityPageState extends State<CommunityPage> {
 // Nutrition (opened from Train)
 // ---------------------------------------------------------------------------
 
-class NutritionPage extends StatefulWidget {
+class NutritionPage extends StatelessWidget {
   final List<Workout> workouts;
   const NutritionPage({super.key, required this.workouts});
-
   @override
-  State<NutritionPage> createState() => _NutritionPageState();
-}
-
-class _NutritionPageState extends State<NutritionPage> {
-  static const _goalKey = 'nutrition_goal_kcal';
-  static const _entriesKey = 'nutrition_entries_v1';
-
-  int calorieGoal = 2200;
-  List<({String meal, int calories})> entries = [];
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_loadNutrition());
-  }
-
-  Future<void> _loadNutrition() async {
-    final prefs = await OfflineStore.getInstance();
-    final storedGoal = prefs.getInt(_goalKey);
-    final raw = prefs.getString(_entriesKey);
-    final decoded =
-        raw == null ? <dynamic>[] : (jsonDecode(raw) as List<dynamic>);
-    if (!mounted) return;
-    setState(() {
-      calorieGoal = storedGoal ?? 2200;
-      entries = decoded
-          .map((item) => item as Map<String, dynamic>)
-          .map((item) =>
-              (meal: item['meal'] as String, calories: item['calories'] as int))
-          .toList();
-    });
-  }
-
-  Future<void> _save() async {
-    final prefs = await OfflineStore.getInstance();
-    await prefs.setInt(_goalKey, calorieGoal);
-    await prefs.setString(
-      _entriesKey,
-      jsonEncode(entries
-          .map((entry) => {'meal': entry.meal, 'calories': entry.calories})
-          .toList()),
-    );
-  }
-
-  void _addEntry(String meal, int calories) {
-    setState(() => entries = [...entries, (meal: meal, calories: calories)]);
-    unawaited(_save());
-  }
-
-  void _removeEntry(int index) {
-    final updated = [...entries]..removeAt(index);
-    setState(() => entries = updated);
-    unawaited(_save());
-  }
-
-  int get consumed => entries.fold<int>(0, (sum, item) => sum + item.calories);
-
-  int get burnedEstimate =>
-      widget.workouts.fold<int>(0, (sum, w) => sum + w.kcal);
-
-  @override
-  Widget build(BuildContext context) {
-    final progress = (consumed / calorieGoal).clamp(0, 1).toDouble();
-    final remaining = calorieGoal - consumed;
-
-    return ListView(padding: pagePadding, children: [
-      AppCard(
-        child: Row(children: [
-          RingProgress(
-            size: 120,
-            stroke: 11,
-            progress: progress,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text('$consumed',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w800, fontSize: 22)),
-              Text('of $calorieGoal kcal',
-                  style: TextStyle(color: mutedOf(context), fontSize: 11)),
-            ]),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Daily nutrition',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-              const SizedBox(height: 8),
-              Text(
-                  remaining >= 0
-                      ? '$remaining kcal remaining'
-                      : '${remaining.abs()} kcal over goal',
-                  style: const TextStyle(
-                      color: aurora, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 4),
-              Text('Estimated burned: $burnedEstimate kcal',
-                  style: TextStyle(color: mutedOf(context), fontSize: 12)),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<int>(
-                initialValue: calorieGoal,
-                decoration: const InputDecoration(
-                    labelText: 'Daily goal', isDense: true),
-                items: [1600, 1800, 2000, 2200, 2400, 2800]
-                    .map((goal) => DropdownMenuItem(
-                        value: goal, child: Text('$goal kcal')))
-                    .toList(),
-                onChanged: (value) {
-                  if (value == null) return;
-                  setState(() => calorieGoal = value);
-                  unawaited(_save());
-                },
-              ),
-            ]),
-          ),
-        ]),
-      ),
-      const SectionTitle('Quick add meals'),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        _MealChip(
-            label: 'Breakfast',
-            calories: 450,
-            onAdd: () => _addEntry('Breakfast', 450)),
-        _MealChip(
-            label: 'Lunch',
-            calories: 650,
-            onAdd: () => _addEntry('Lunch', 650)),
-        _MealChip(
-            label: 'Dinner',
-            calories: 700,
-            onAdd: () => _addEntry('Dinner', 700)),
-        _MealChip(
-            label: 'Snack',
-            calories: 220,
-            onAdd: () => _addEntry('Snack', 220)),
-        _MealChip(
-            label: 'Protein shake',
-            calories: 180,
-            onAdd: () => _addEntry('Protein shake', 180)),
-      ]),
-      const SectionTitle("Today's log"),
-      if (entries.isEmpty)
-        AppCard(
-            child: Text('No meals logged yet. Add a meal to start tracking.',
-                style: TextStyle(color: mutedOf(context))))
-      else
-        ...entries.asMap().entries.map((item) => AppCard(
-              padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
-              child: Row(children: [
-                const Icon(Icons.restaurant, color: aurora),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(item.value.meal,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w700)),
-                        Text('${item.value.calories} kcal',
-                            style: TextStyle(
-                                color: mutedOf(context), fontSize: 13)),
-                      ]),
-                ),
-                IconButton(
-                  tooltip: 'Remove ${item.value.meal}',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () => _removeEntry(item.key),
-                ),
-              ]),
-            )),
-    ]);
-  }
-}
-
-class _MealChip extends StatelessWidget {
-  final String label;
-  final int calories;
-  final VoidCallback onAdd;
-  const _MealChip(
-      {required this.label, required this.calories, required this.onAdd});
-
-  @override
-  Widget build(BuildContext context) => ActionChip(
-      avatar: const Icon(Icons.add, size: 16, color: aurora),
-      label: Text('$label · $calories kcal'),
-      onPressed: onAdd);
+  Widget build(BuildContext context) => DailyNutritionPage(
+      activityCredits: () =>
+          workouts.map((w) => ActivityCalorieCredit(w.date, w.kcal)).toList());
 }
 
 // ---------------------------------------------------------------------------
 // Quests
 // ---------------------------------------------------------------------------
-
 class QuestsPage extends StatefulWidget {
   final List<Workout> workouts;
   const QuestsPage({super.key, required this.workouts});
@@ -2936,25 +2757,16 @@ class _ProfilePageState extends State<ProfilePage> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [northstar, aurora]),
-                ),
-                child: const Icon(Icons.person, color: iceWhite, size: 32),
-              ),
+              const ProfilePhotoButton(),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('FitQuest Explorer',
-                          style: TextStyle(
+                      Text(
+                          OfflineStore.instance.user?['username'] as String? ??
+                              'FitQuest Explorer',
+                          style: const TextStyle(
                               fontSize: 20, fontWeight: FontWeight.w700)),
                       Row(children: [
                         Text('Level ${_levelFor(totalXp)}',
@@ -2970,6 +2782,12 @@ class _ProfilePageState extends State<ProfilePage> {
           AppCard(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Column(children: [
+              const Padding(
+                  padding: EdgeInsets.all(14), child: ProfileGenderSelector()),
+              const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14),
+                  child: Text(
+                      'Your profile photo and gender save privately and sync to your account.')),
               _StatRow(
                 label: 'Weight',
                 value: currentWeight == null

@@ -128,6 +128,9 @@ Definitions and results remain isolated through the existing per-user state keys
 
 ## Phone steps and sponsor placements
 
+See [profile and daily nutrition](PROFILE_NUTRITION.md) for profile photo/gender,
+food/drink timestamps, daily exercise-credit arithmetic and legacy-log handling.
+
 Android uses TYPE_STEP_COUNTER and an optional health foreground service with an
 ongoing notification. Counting begins from the first enabled sensor reading,
 continues offline, and handles counter resets and phone reboots without adding a

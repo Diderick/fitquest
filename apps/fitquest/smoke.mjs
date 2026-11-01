@@ -82,7 +82,23 @@ try {
   assert.ok((await landing.text()).includes('fitquest-auth://invite?'));
   assert.deepEqual((await request('/v2/friends/suggestions', alice.token)).people, []);
   await request('/v2/sync', bob.token, { operations: [{ id: randomUUID(), key: 'friend_discovery', value: true, base: 0 }] });
-  console.log('Live HTTPS account, sync, following, challenge, invitation landing and follow/join lookup checks passed');
+  const date = new Date().toISOString().slice(0, 10);
+  const photo = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxuYAAAAASUVORK5CYII=';
+  const nutrition = { id: 'smoke-food', name: 'Test food', kind: 'food', portion: '1 serving', calories: 150, date, time: '12:30', legacy: false };
+  await request('/v2/sync', alice.token, { operations: [
+    { id: randomUUID(), key: 'profile_gender', value: 'other', base: 0 },
+    { id: randomUUID(), key: 'profile_photo_v1', value: photo, base: 0 },
+    { id: randomUUID(), key: 'nutrition_entry.smoke-food', value: JSON.stringify(nutrition), base: 0 },
+    { id: randomUUID(), key: `nutrition_goal.${date}`, value: 2200, base: 0 },
+  ] });
+  const personal = (await request('/v2/sync', alice.token, { operations: [] })).state;
+  assert.equal(personal.profile_gender.value, 'other');
+  assert.equal(personal.profile_photo_v1.value, photo);
+  assert.equal(JSON.parse(personal['nutrition_entry.smoke-food'].value).date, date);
+  const other = (await request('/v2/sync', bob.token, { operations: [] })).state;
+  assert.equal(other.profile_photo_v1, undefined);
+  assert.equal(other['nutrition_entry.smoke-food'], undefined);
+  console.log('Live HTTPS account, invitation, profile photo/gender and private dated nutrition sync checks passed');
 } finally {
   if (process.env.FITQUEST_SMOKE_SSH === '1') {
     const output = execFileSync('ssh', ['-o', 'BatchMode=yes', 'ssh.northstarlabs.tech',

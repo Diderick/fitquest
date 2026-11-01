@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { challengeApi } from './challenge_api.mjs';
 import { oauth } from './oauth.mjs';
 import { socialFriends } from './social_friends.mjs';
+import { validProfileNutrition } from './profile_nutrition.mjs';
 const scrypt = promisify(scryptCallback);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const passwordHash = (password, salt) => scrypt(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
@@ -60,9 +61,11 @@ export function accounts(db, reply) {
   const selectState = db.prepare('SELECT key,value,version FROM user_state WHERE user_id=?');
   const oauthRoute = oauth(db, reply, { body, rateLimit, sessionFor, createSession, friends });
   const state = userId => Object.fromEntries(selectState.all(userId).map(row => [row.key, { value: JSON.parse(row.value), version: row.version }]));
-  const allowed = key => /^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|ads_hidden|friend_discovery|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following\/[\w-]+)$/.test(key);
+  const allowed = key => /^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|profile_gender|profile_photo_v1|ads_hidden|friend_discovery|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following\/[\w-]+)$/.test(key);
   function validateValue(key, value) {
     if (!allowed(key)) return false;
+    const specific = validProfileNutrition(key, value);
+    if (specific !== undefined) return specific;
     if (key.startsWith('following/') || key === 'friend_discovery') return typeof value === 'boolean';
     if (['bl_start', 'bl_current', 'body_fat'].includes(key)) return value === null || (typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 500);
     return value === null || typeof value === 'string' || typeof value === 'boolean'

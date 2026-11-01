@@ -5,6 +5,7 @@ import 'offline_store.dart';
 import 'step_tracker.dart';
 import 'social_auth.dart';
 import 'friend_discovery.dart';
+import 'profile_identity.dart';
 
 String jsonEncodeSocial(Map<String, dynamic> value) => jsonEncode(value);
 Map<String, dynamic> decodeSocial(String value) =>
@@ -23,6 +24,8 @@ String syncItemLabel(String key) =>
       'bl_current': 'Latest weigh-in',
       'bl_joined': 'Competition entry',
       'body_fat': 'Body fat',
+      'profile_gender': 'Gender',
+      'profile_photo_v1': 'Profile photo',
       'ads_hidden': 'Sponsor preference',
     }[key] ??
     (key.startsWith('challenge_result.')
@@ -37,8 +40,15 @@ String syncItemLabel(String key) =>
                         ? 'Daily steps'
                         : 'Following');
 
-String syncValueSummary(Object? value) {
+String syncValueSummary(Object? value, {String? key}) {
   if (value == null) return 'Not recorded';
+  if (key == 'profile_photo_v1') return 'Saved profile photo';
+  if (key?.startsWith('nutrition_entry.') == true && value is String) {
+    try {
+      final entry = jsonDecode(value) as Map;
+      return '${entry['name']} · ${entry['calories']} kcal · ${entry['date'] ?? 'Undated'} ${entry['time'] ?? ''}';
+    } catch (_) {}
+  }
   if (value is List) return '${value.length} saved items';
   if (value is String && value.startsWith('[')) {
     try {
@@ -125,9 +135,28 @@ class _AccountPageState extends State<AccountPage> {
                                 Text(
                                     'Changes on two devices: ${syncItemLabel(key)}'),
                                 Text(
-                                    'This phone: ${syncValueSummary(store.get(key))}'),
+                                    'This phone: ${syncValueSummary(store.get(key), key: key)}'),
                                 Text(
-                                    'Server: ${syncValueSummary(store.serverValue(key))}'),
+                                    'Server: ${syncValueSummary(store.serverValue(key), key: key)}'),
+                                if (key == 'profile_photo_v1')
+                                  Wrap(spacing: 12, children: [
+                                    for (final value in [
+                                      store.get(key),
+                                      store.serverValue(key)
+                                    ])
+                                      SizedBox(
+                                          width: 72,
+                                          height: 72,
+                                          child: decodeProfilePhoto(value) ==
+                                                  null
+                                              ? const Icon(Icons.person_outline)
+                                              : Image.memory(
+                                                  decodeProfilePhoto(value)!,
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (_, __, ___) =>
+                                                      const Icon(Icons
+                                                          .person_outline))),
+                                  ]),
                                 const Text(
                                     'Both versions are kept until you choose which to sync.'),
                                 Wrap(spacing: 12, children: [
