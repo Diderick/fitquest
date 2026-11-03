@@ -1,5 +1,14 @@
 import 'dart:convert';
+import 'dart:math';
 import 'offline_store.dart';
+
+/// 8 characters without look-alikes (no 0/O, 1/I).
+String newJoinCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  final random = Random.secure();
+  return List.generate(8, (_) => alphabet[random.nextInt(alphabet.length)])
+      .join();
+}
 
 enum ChallengeMetric {
   reps('Repetitions'),
@@ -93,7 +102,7 @@ class FitnessChallenge {
       endDate,
       visibility;
   final List<TestEvent> events;
-  final String? ownerId, ownerName;
+  final String? ownerId, ownerName, joinCode;
   const FitnessChallenge(
       {required this.id,
       required this.title,
@@ -104,7 +113,8 @@ class FitnessChallenge {
       required this.visibility,
       required this.events,
       this.ownerId,
-      this.ownerName});
+      this.ownerName,
+      this.joinCode});
   Map<String, dynamic> toJson() => {
         'id': id,
         'title': title,
@@ -113,7 +123,8 @@ class FitnessChallenge {
         'startDate': startDate,
         'endDate': endDate,
         'visibility': visibility,
-        'events': events.map((e) => e.toJson()).toList()
+        'events': events.map((e) => e.toJson()).toList(),
+        if (joinCode != null) 'joinCode': joinCode
       };
   factory FitnessChallenge.fromJson(Map<String, dynamic> json) =>
       FitnessChallenge(
@@ -129,7 +140,8 @@ class FitnessChallenge {
                   TestEvent.fromJson(Map<String, dynamic>.from(e as Map)))
               .toList(),
           ownerId: json['ownerId'] as String?,
-          ownerName: json['ownerName'] as String?);
+          ownerName: json['ownerName'] as String?,
+          joinCode: json['joinCode'] as String?);
   bool acceptsDate(String date) =>
       date.compareTo(startDate) >= 0 && date.compareTo(endDate) <= 0;
 }
@@ -236,6 +248,38 @@ class ChallengeRepository {
     await store.setBool('challenge_join.$id', join);
   }
 
+  /// Looks the code up on the server, saves the challenge locally and joins it.
+  Future<FitnessChallenge> joinWithCode(String input) async {
+    final code = input.trim().toUpperCase().replaceAll(RegExp(r'[\s-]'), '');
+    if (!RegExp(r'^[A-Z0-9]{8}$').hasMatch(code)) {
+      throw StateError('Enter the 8-character code from the creator.');
+    }
+    if (!store.signedIn) throw StateError('Sign in to join with a code.');
+    final response = await store.request('/v2/challenges/code/$code');
+    final challenge = FitnessChallenge.fromJson(
+        Map<String, dynamic>.from(response['challenge'] as Map));
+    if (!isOwner(challenge)) {
+      final known = discovered.where((c) => c.id != challenge.id).toList();
+      await store.setString('_challenge_discovery',
+          jsonEncode([...known, challenge].map(_withOwner).toList()));
+    }
+    await join(challenge.id, true);
+    return challenge;
+  }
+
+  Map<String, dynamic> _withOwner(FitnessChallenge c) => {
+        ...c.toJson(),
+        if (c.ownerId != null) 'ownerId': c.ownerId,
+        if (c.ownerName != null) 'ownerName': c.ownerName,
+      };
+
+  Future<void> ensureJoinCode(FitnessChallenge challenge) async {
+    if (!isOwner(challenge)) throw StateError('Only the creator has a code.');
+    if (challenge.joinCode != null) return;
+    await store.setString('challenge.${challenge.id}',
+        jsonEncode({...challenge.toJson(), 'joinCode': newJoinCode()}));
+  }
+
   List<ChallengeResult> results(String id) => store.keys
       .where((key) => key.startsWith('challenge_result.$id.'))
       .where((key) => store.getString(key) != null)
@@ -298,6 +342,18 @@ List<TestEvent> challengeTemplate(String template) {
     'CrossFit-style for time' => [
         event('21–15–9 workout', ChallengeMetric.seconds, false,
             'Complete rounds of 21, 15 and 9 thrusters and pull-ups. Set and record the load and scaling before comparing results. Log completion time only; use notes for unfinished attempts.')
+      ],
+    'Half marathon progression' => [
+        event('Longest run distance', ChallengeMetric.metres, true,
+            'Record your single longest run in metres during this challenge window.'),
+        event('21.1 km completion time', ChallengeMetric.seconds, false,
+            'If you complete a half marathon effort, log your finish time.'),
+      ],
+    'Comrades build-up' => [
+        event('Longest long run', ChallengeMetric.metres, true,
+            'Log your longest single endurance run in metres.'),
+        event('Weekly endurance volume', ChallengeMetric.metres, true,
+            'Log one weekly total distance effort in metres for leaderboard comparison.'),
       ],
     _ => [event('Exercise 1', ChallengeMetric.reps, true, '')],
   };

@@ -36,11 +36,11 @@ void main() {
     expect(decodeProfilePhoto(restarted.get('profile_photo_v1')), bytes);
     expect(restarted.getString('profile_gender'), 'other');
   });
-  testWidgets('gender offers male, female and other and saves the selection',
+  testWidgets('gender offers male and female and saves the selection',
       (tester) async {
     await tester.pumpWidget(
         const MaterialApp(home: Scaffold(body: ProfileGenderSelector())));
-    for (final gender in ['Male', 'Female', 'Other']) {
+    for (final gender in ['Male', 'Female']) {
       await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
       await tester.tap(find.text(gender).last);
@@ -48,5 +48,8 @@ void main() {
       expect(OfflineStore.instance.getString('profile_gender'),
           gender.toLowerCase());
     }
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('Other'), findsNothing);
   });
 }

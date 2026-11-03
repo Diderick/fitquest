@@ -1,4 +1,4 @@
-name: fitquest
+﻿name: fitquest
 description: Northstar Labs FitQuest fitness and community prototype
 publish_to: none
 version: 0.1.0+1
@@ -14,11 +14,16 @@ dependencies:
   share_plus: ^11.1.0
   app_links: ^6.4.1
   url_launcher: ^6.3.2
+  flutter_tts: ^4.2.2
+  just_audio: ^0.10.4
   crypto: ^3.0.6
   image_picker: ^1.2.4
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
 flutter:
   uses-material-design: true
+

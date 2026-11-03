@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,9 @@ class ActivityShareData {
   final int minutes;
   final double? distanceKm;
   final DateTime date;
+  final String? photoBase64;
+  final bool showStartPoint;
+  final bool showEndPoint;
   final List<({double latitude, double longitude})> route;
   const ActivityShareData(
       {required this.activity,
@@ -17,6 +21,9 @@ class ActivityShareData {
       required this.date,
       this.distanceKm,
       this.notes = '',
+      this.photoBase64,
+      this.showStartPoint = true,
+      this.showEndPoint = true,
       this.route = const []});
   String get dateLabel =>
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
@@ -30,7 +37,11 @@ class ActivityShareData {
 
 /// Renders a self-contained image offline; no remote upload or location URL.
 Future<Uint8List> activityCard(ActivityShareData data,
-    {bool includeRoute = false, bool includeNotes = false}) async {
+    {bool includeRoute = false,
+    bool includeNotes = false,
+    bool includePhoto = true,
+    bool showStartPoint = true,
+    bool showEndPoint = true}) async {
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
   const size = Size(1080, 1350);
@@ -80,6 +91,29 @@ Future<Uint8List> activityCard(ActivityShareData data,
   const box = Rect.fromLTWH(72, 568, 936, 520);
   canvas.drawRRect(RRect.fromRectAndRadius(box, const Radius.circular(32)),
       Paint()..color = const Color(0xFF102235));
+  final photoBytes = (() {
+    if (!includePhoto || data.photoBase64 == null) return null;
+    try {
+      return base64Decode(data.photoBase64!);
+    } catch (_) {
+      return null;
+    }
+  })();
+  if (photoBytes != null) {
+    final codec = await ui.instantiateImageCodec(photoBytes);
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
+    final source =
+        Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+    canvas.save();
+    canvas.clipRRect(RRect.fromRectAndRadius(box, const Radius.circular(32)));
+    canvas.drawImageRect(
+        image, source, box, Paint()..filterQuality = FilterQuality.high);
+    canvas.drawRect(box, Paint()..color = const Color(0x5509151F));
+    canvas.restore();
+    image.dispose();
+    codec.dispose();
+  }
   final route = data.route
       .where((p) => p.latitude.isFinite && p.longitude.isFinite)
       .toList();
@@ -117,9 +151,35 @@ Future<Uint8List> activityCard(ActivityShareData data,
           ..strokeWidth = 12
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round);
+    Offset pointAt(({double latitude, double longitude}) point) => Offset(
+        left + (point.longitude - minLon) * lonScale * scale,
+        top + (maxLat - point.latitude) * scale);
+    if (showStartPoint) {
+      final start = pointAt(route.first);
+      canvas.drawCircle(start, 12, Paint()..color = const Color(0xFF35E082));
+      canvas.drawCircle(
+          start,
+          12,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..color = Colors.white);
+    }
+    if (showEndPoint) {
+      final end = pointAt(route.last);
+      canvas.drawCircle(end, 12, Paint()..color = const Color(0xFFFF5B4D));
+      canvas.drawCircle(
+          end,
+          12,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..color = Colors.white);
+    }
     text('ROUTE SKETCH', 108, 608, 24, color: const Color(0xFFB8CCD2));
   } else {
-    text('EVERY\nSESSION\nCOUNTS.', 126, 668, 78,
+    text(photoBytes == null ? 'EVERY\nSESSION\nCOUNTS.' : 'YOUR\nBEST\nMOMENT.',
+        126, 668, 78,
         weight: FontWeight.w800, width: 800, maxLines: 3);
   }
   if (includeNotes && data.notes.isNotEmpty) {
@@ -149,9 +209,28 @@ class ActivitySharePage extends StatefulWidget {
 
 class _ActivitySharePageState extends State<ActivitySharePage> {
   bool includeRoute = false, includeNotes = false, busy = false;
-  late Future<Uint8List> preview = activityCard(widget.activity);
+  late bool showStartPoint = widget.activity.showStartPoint;
+  late bool showEndPoint = widget.activity.showEndPoint;
+  late bool includePhoto = widget.activity.photoBase64 != null;
+  late Future<Uint8List> preview;
+
+  @override
+  void initState() {
+    super.initState();
+    preview = activityCard(widget.activity,
+        includeRoute: includeRoute,
+        includeNotes: includeNotes,
+        includePhoto: includePhoto,
+        showStartPoint: showStartPoint,
+        showEndPoint: showEndPoint);
+  }
+
   void refresh() => setState(() => preview = activityCard(widget.activity,
-      includeRoute: includeRoute, includeNotes: includeNotes));
+      includeRoute: includeRoute,
+      includeNotes: includeNotes,
+      includePhoto: includePhoto,
+      showStartPoint: showStartPoint,
+      showEndPoint: showEndPoint));
   Rect? origin(BuildContext context) {
     final box = context.findRenderObject();
     return box is RenderBox && box.hasSize
@@ -248,6 +327,39 @@ class _ActivitySharePageState extends State<ActivitySharePage> {
                   ? null
                   : (value) {
                       includeRoute = value;
+                      refresh();
+                    }),
+        if (includeRoute && widget.activity.route.length > 1) ...[
+          SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Show start marker'),
+              value: showStartPoint,
+              onChanged: busy
+                  ? null
+                  : (value) {
+                      showStartPoint = value;
+                      refresh();
+                    }),
+          SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Show end marker'),
+              value: showEndPoint,
+              onChanged: busy
+                  ? null
+                  : (value) {
+                      showEndPoint = value;
+                      refresh();
+                    }),
+        ],
+        if (widget.activity.photoBase64 != null)
+          SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Include activity photo'),
+              value: includePhoto,
+              onChanged: busy
+                  ? null
+                  : (value) {
+                      includePhoto = value;
                       refresh();
                     }),
         if (widget.activity.notes.isNotEmpty)

@@ -272,13 +272,13 @@ class _SocialFriendImportPanelState extends State<SocialFriendImportPanel> {
                           onPressed: () async {
                             try {
                               final invite = await ownInvitation();
-                              await Clipboard.setData(
-                                  ClipboardData(text: invite.url));
+                              await Clipboard.setData(ClipboardData(
+                                  text: invitationShareText(invite)));
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                        content:
-                                            Text('Invitation link copied.')));
+                                        content: Text(
+                                            'Invitation details copied.')));
                               }
                             } catch (_) {
                               if (context.mounted) {

@@ -23,8 +23,9 @@ FitQuest is a Flutter fitness-tracking prototype with Strava-inspired activity l
 - Share an activity as an image card or text through the phone's share sheet, or post its summary to the FitQuest feed. Notes and route sketches default off.
 - Google/Facebook sign-in and account linking are prepared; activation needs [provider registration](apps/fitquest/SOCIAL_SETUP.md).
 - Review opt-in social matches and follow selected people, or share invitation links with explicit follow-and-join actions. [Provider import setup](apps/fitquest/FRIENDS_SETUP.md) needs extra permissions.
-- Add a private profile photo and select Male, Female or Other; both save offline and sync to your account.
+- Add a private profile photo and select Male or Female; both save offline and sync to your account.
 - Log food and drinks with portions, calories, dates and times. Daily allowance adds that date's estimated activity calories to its base goal.
+- Add calorie quick defaults for common items (egg, bread, milk, banana, etc.) and show a warning when allowance is exceeded.
 
 ## Run
 
@@ -38,8 +39,11 @@ flutter run
 ## Build Android APK
 
 ```sh
-flutter build apk --release
+flutter build apk --release --split-per-abi
 ```
+
+This project now enables release shrinking (`minifyEnabled` + `shrinkResources`) to reduce final APK size.
+Use split-per-ABI builds for smaller per-device downloads.
 
 GPS recording asks for location permission when started and works only while the recorder screen is open. Android location permissions are included in the manifest. Route points are stored with the activity on the device.
 

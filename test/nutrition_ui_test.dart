@@ -82,4 +82,41 @@ void main() {
     expect(entry.date, nutritionDate(DateTime.now()));
     expect(entry.time, nowTime);
   });
+
+  testWidgets('preset servings recalculate the total nutrition values',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: DailyNutritionPage(activityCredits: () => []))));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Log food'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('Log food'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Banana').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Total for this entry. Use 0 if needed.'), findsOneWidget);
+
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Preset servings'), '2');
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.widgetWithText(TextFormField, 'Calories (kcal)'))
+            .controller!
+            .text,
+        '210');
+    await tester.ensureVisible(find.text('Macros (optional)'));
+    await tester.tap(find.text('Macros (optional)'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.widgetWithText(TextFormField, 'Protein (g)'))
+            .controller!
+            .text,
+        '2.6');
+  });
 }

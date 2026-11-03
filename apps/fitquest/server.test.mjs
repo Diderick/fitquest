@@ -118,6 +118,17 @@ test('authentication, validation, conflict detection and persistence', async () 
     assert.equal((await api('/v2/challenges/private-test', bob.token)).status, 404);
     assert.equal((await sync(bob.token, [{ id: 'delete-attempt', key: resultOp.key, value: null, base: 1 }])).status, 200);
     assert.equal((await (await api('/v2/challenges/military-test', alice.token)).json()).results.length, 0);
+    const coded = { ...definition, id: 'coded-test', visibility: 'private', joinCode: 'ABCD2345' };
+    assert.equal((await sync(alice.token, [{ id: 'coded', key: 'challenge.coded-test', value: JSON.stringify(coded), base: 0 }])).status, 200);
+    assert.equal((await api('/v2/challenges/coded-test', bob.token)).status, 404);
+    assert.equal((await api('/v2/challenges/code/ZZZZ9999', bob.token)).status, 404);
+    assert.equal((await (await api('/v2/challenges/code/abcd2345', bob.token)).json()).challenge.id, 'coded-test');
+    assert.equal((await sync(bob.token, [{ id: 'join-coded', key: 'challenge_join.coded-test', value: true, base: 0 }])).status, 200);
+    const codedResult = { ...result, id: 'coded1', challengeId: 'coded-test' };
+    assert.equal((await sync(bob.token, [{ id: 'coded-result', key: 'challenge_result.coded-test.coded1', value: JSON.stringify(codedResult), base: 0 }])).status, 200);
+    const codedBoard = await (await api('/v2/challenges/coded-test', alice.token)).json();
+    assert.equal(codedBoard.results[0].userId, bob.user.id);
+    assert.ok((await (await api('/v2/challenges', bob.token)).json()).challenges.some(c => c.id === 'coded-test'));
     await stop(); await start();
     assert.equal((await (await sync(alice.token, [])).json()).state.bl_start.value, 95.5);
     await api('/v2/auth/logout', alice.token, {});

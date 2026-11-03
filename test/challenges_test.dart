@@ -18,6 +18,21 @@ void main() {
       metric: ChallengeMetric.reps,
       higherWins: true,
       target: 40);
+  test('join codes are 8 safe characters and survive JSON', () {
+    final code = newJoinCode();
+    expect(RegExp(r'^[A-HJ-NP-Z2-9]{8}$').hasMatch(code), isTrue);
+    final challenge = FitnessChallenge(
+        id: 'c1',
+        title: 'T',
+        category: 'Custom',
+        instructions: '',
+        startDate: '2026-01-01',
+        endDate: '2026-02-01',
+        visibility: 'private',
+        joinCode: code,
+        events: const [reps]);
+    expect(FitnessChallenge.fromJson(challenge.toJson()).joinCode, code);
+  });
   test('time parsing, directions and targets keep each exercise unit intact',
       () {
     expect(time.parse('14:30'), 870);

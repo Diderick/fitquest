@@ -3,10 +3,57 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'account_ui.dart' show AccountPage;
 import 'challenges.dart';
 import 'challenge_ui.dart' show ChallengeDetail;
 import 'offline_store.dart';
+
+const fitquestAndroidDownloadUrl = String.fromEnvironment(
+    'FITQUEST_ANDROID_DOWNLOAD_URL',
+    defaultValue:
+        'https://play.google.com/store/apps/details?id=com.fitquest.app');
+const fitquestIosDownloadUrl = String.fromEnvironment(
+    'FITQUEST_IOS_DOWNLOAD_URL',
+    defaultValue: 'https://apps.apple.com/');
+
+final _inviteCodePattern = RegExp(r'^[A-Za-z0-9_-]{12,32}$');
+
+String _withInviteCode(String baseUrl, FriendInvitation invitation) {
+  final uri = Uri.tryParse(baseUrl);
+  if (uri == null || !uri.hasScheme) return baseUrl;
+  final params = Map<String, String>.from(uri.queryParameters)
+    ..['invite'] = invitation.code;
+  if (invitation.challengeId != null) {
+    params['challenge'] = invitation.challengeId!;
+  }
+  return uri.replace(queryParameters: params).toString();
+}
+
+String invitationShareText(FriendInvitation invitation,
+    {String? challengeTitle}) {
+  final lines = <String>[
+    challengeTitle == null
+        ? 'Join me on FitQuest! Follow my training and challenges.'
+        : 'Join my FitQuest challenge: $challengeTitle',
+    'Invite code: ${invitation.code}',
+    invitation.url,
+  ];
+  final downloads = <String>[
+    if (fitquestAndroidDownloadUrl.isNotEmpty)
+      'Android: ${_withInviteCode(fitquestAndroidDownloadUrl, invitation)}',
+    if (fitquestIosDownloadUrl.isNotEmpty)
+      'iPhone: ${_withInviteCode(fitquestIosDownloadUrl, invitation)}',
+  ];
+  if (downloads.isNotEmpty) {
+    lines
+      ..add('')
+      ..add(
+          'No app yet? Download first, then open this invitation link or paste the invite code:')
+      ..addAll(downloads);
+  }
+  return lines.join('\n');
+}
 
 class FriendInvitation {
   final String code;
@@ -16,7 +63,7 @@ class FriendInvitation {
       '$accountApiUrl/join/$code${challengeId == null ? '' : '?challenge=${Uri.encodeQueryComponent(challengeId!)}'}';
   static FriendInvitation? parse(String text) {
     final raw = text.trim();
-    if (RegExp(r'^[A-Za-z0-9_-]{24}$').hasMatch(raw)) {
+    if (_inviteCodePattern.hasMatch(raw)) {
       return FriendInvitation(raw);
     }
     final uri = Uri.tryParse(raw);
@@ -33,7 +80,7 @@ class FriendInvitation {
     }
     final challenge = uri.queryParameters['challenge'];
     if (code == null ||
-        !RegExp(r'^[A-Za-z0-9_-]{24}$').hasMatch(code) ||
+        !_inviteCodePattern.hasMatch(code) ||
         (challenge != null && !RegExp(r'^[\w-]{1,64}$').hasMatch(challenge))) {
       return null;
     }
@@ -107,8 +154,7 @@ Future<void> shareFriendInvitation(BuildContext context,
     final invitation = await ownInvitation(challengeId: challengeId);
     if (!context.mounted) return;
     await SharePlus.instance.share(ShareParams(
-        text:
-            '${challengeTitle == null ? 'Join me on FitQuest! Follow my training and challenges.' : 'Join my FitQuest challenge: $challengeTitle'}\n${invitation.url}',
+        text: invitationShareText(invitation, challengeTitle: challengeTitle),
         subject: 'FitQuest invitation',
         sharePositionOrigin: origin));
   } catch (_) {
@@ -298,6 +344,33 @@ class _FriendInvitePageState extends State<FriendInvitePage> {
             if (!store.signedIn) ...[
               const Text(
                   'Join FitQuest or sign in to follow this friend and join their challenge.'),
+              const SizedBox(height: 8),
+              SelectableText('Invite code: ${widget.invitation.code}'),
+              const SizedBox(height: 6),
+              TextButton.icon(
+                  onPressed: () async {
+                    await SharePlus.instance.share(ShareParams(
+                        text: invitationShareText(widget.invitation),
+                        subject: 'FitQuest invitation'));
+                  },
+                  icon: const Icon(Icons.share_outlined),
+                  label: const Text('Share invite with app download links')),
+              if (fitquestAndroidDownloadUrl.isNotEmpty)
+                OutlinedButton.icon(
+                    onPressed: () => launchUrl(
+                        Uri.parse(_withInviteCode(
+                            fitquestAndroidDownloadUrl, widget.invitation)),
+                        mode: LaunchMode.externalApplication),
+                    icon: const Icon(Icons.android),
+                    label: const Text('Download for Android')),
+              if (fitquestIosDownloadUrl.isNotEmpty)
+                OutlinedButton.icon(
+                    onPressed: () => launchUrl(
+                        Uri.parse(_withInviteCode(
+                            fitquestIosDownloadUrl, widget.invitation)),
+                        mode: LaunchMode.externalApplication),
+                    icon: const Icon(Icons.phone_iphone),
+                    label: const Text('Download for iPhone')),
               FilledButton(
                   onPressed: () => Navigator.push(
                       context,

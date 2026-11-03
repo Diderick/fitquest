@@ -1,0 +1,18 @@
+﻿{
+  "name": "fitquest-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:up": "docker compose up -d --build db api",
+    "dev:reset": "docker compose down -v && docker compose up -d --build db api",
+    "cf:setup": "node cf-setup.mjs",
+    "cf:secrets": "node cf-secrets.mjs",
+    "cf:check": "node cf-check.mjs",
+    "cf:go-live": "node cf-go-live.mjs",
+    "cf:dev": "npm run cf:check && npx wrangler dev",
+    "cf:deploy": "npm run cf:check && npx wrangler deploy"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

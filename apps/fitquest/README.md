@@ -1,4 +1,4 @@
-# FitQuest accounts and offline sync
+﻿# FitQuest accounts and offline sync
 
 The Flutter app saves changes locally first. Activities, GPS routes, goals, plans,
 nutrition, weigh-ins, community posts, follow choices, ad preferences and daily
@@ -39,11 +39,26 @@ docker compose ps
 docker compose logs --tail=50 api tunnel
 ```
 
-Data lives in the `fitquest_fitquest-data` Docker volume. Preserve this volume
-when updating. `deploy.sh` makes an online database backup before replacing an
-existing API container. Keep backups off the server as well. Back up SQLite with its online backup API or stop the API before
-copying the database; WAL files can contain uncheckpointed writes. Do not use
-`docker compose down -v` unless intentionally deleting activity data.
+Data lives in the `fitquest_fitquest-postgres` Docker volume. Preserve this volume
+when updating. `deploy.sh` exports a PostgreSQL backup before replacing an
+existing API container. Keep backups off the server as well. Do not use
+`docker compose down -v` unless intentionally deleting account and sync data.
+
+For development-only clean starts, reset both containers and the PostgreSQL volume:
+
+```sh
+cd apps/fitquest
+npm run dev:reset
+```
+
+This removes all API/account data and recreates an empty PostgreSQL database.
+
+For normal development restarts that keep existing PostgreSQL data:
+
+```sh
+cd apps/fitquest
+npm run dev:up
+```
 
 ## Connect Flutter
 
@@ -71,7 +86,7 @@ Google/Facebook browser sign-in and explicit account linking are prepared; see
 Without credentials, these buttons stay disabled and email login still works.
 The same guide covers activity image/text sharing to installed apps.
 
-SQLite contains users, hashed sessions, per-user state, sync receipts and follow
+PostgreSQL contains users, hashed sessions, per-user state, sync receipts and follow
 relationships. Passwords use a random salt and scrypt (N=32768, r=8, p=1). Sessions
 expire after 90 days; expired sessions require sign-in to resume sync, while
 local logging continues. Authentication endpoints are rate-limited. Email
@@ -94,7 +109,7 @@ privacy policy before distributing sensitive health-data features publicly.
 
 ## Custom fitness challenges
 
-Open **Quests → My fitness challenges** (Challenges tab) or **Community → Create
+Open **Quests â†’ My fitness challenges** (Challenges tab) or **Community â†’ Create
 a fitness challenge**. Choose Custom, Military-style test, CrossFit-style AMRAP
 or CrossFit-style for time. Set a name, dates, exercise protocols, equipment,
 scaling and optional pass thresholds. Every exercise uses reps, seconds, metres,
@@ -167,7 +182,7 @@ assigned to a new account. New builds do not include the old shared token.
 
 ## Verification
 
-Node 22 or newer is required (SQLite is built in).
+Node 22 or newer is required for the API runtime.
 
 ```sh
 node --test apps/fitquest/server.test.mjs apps/fitquest/oauth.test.mjs
@@ -187,3 +202,104 @@ Then in PowerShell run `$env:FITQUEST_SMOKE_SSH='1'` followed by
 `node apps/fitquest/smoke.mjs`. The test prints no credentials and cleans up only
 the accounts it creates. Android sensor permissions, background operation,
 midnight rollover and reboots still need real-phone QA.
+
+
+
+
+## Cloudflare primary runtime (Workers + Postgres)
+
+Use this when you want Cloudflare to run the API as primary runtime instead of a single self-hosted Node process.
+
+1. Keep PostgreSQL as the source of truth (managed provider recommended for automatic DB failover).
+2. Create a Cloudflare Hyperdrive binding for that PostgreSQL instance.
+3. Bootstrap worker config (domain + Hyperdrive ID):
+
+```sh
+cd apps/fitquest
+npm run cf:setup -- --domain fitquest-api.northstarlabs.tech --hyperdrive-id <YOUR_HYPERDRIVE_ID>
+```
+
+4. Copy secrets template and fill values:
+
+```sh
+cd apps/fitquest
+cp .env.cloudflare.example .env.cloudflare
+```
+
+5. Upload Wrangler secrets from `.env.cloudflare`:
+
+```sh
+cd apps/fitquest
+npm run cf:secrets
+```
+
+6. Run pre-deploy checks:
+
+```sh
+cd apps/fitquest
+npm run cf:check
+```
+
+7. Deploy the Worker:
+
+```sh
+cd apps/fitquest
+npm run cf:deploy
+```
+
+Or run everything in one command:
+
+```sh
+cd apps/fitquest
+npm run cf:go-live -- --domain fitquest-api.northstarlabs.tech --hyperdrive-id <YOUR_HYPERDRIVE_ID>
+```
+
+Use `--skip-secrets` if your Wrangler secrets are already uploaded.
+
+Cloudflare runtime files:
+- `worker.mjs` (Worker entrypoint)
+- `wrangler.jsonc` (Worker config + Hyperdrive binding)
+- `app_handler.mjs` (shared API handler for Node + Worker)
+- `cf-setup.mjs` (writes domain/hyperdrive config)
+- `cf-secrets.mjs` (uploads required Wrangler secrets)
+- `cf-check.mjs` (pre-deploy validator)
+- `cf-go-live.mjs` (one-command setup + secrets + check + deploy)
+
+Keep `docker compose` deployment available during migration until Worker traffic is fully validated.
+## Cloudflare failover runbook
+
+Choose one failover model:
+
+### Model 1: Worker-primary (recommended)
+
+- Cloudflare Worker is primary compute (global, no single-server power risk).
+- Hyperdrive connects Worker to managed HA PostgreSQL.
+- Database failover is handled by the managed PostgreSQL provider.
+
+Steps:
+1. Deploy Worker (`npm run cf:deploy`) and attach your custom API domain.
+2. Configure Hyperdrive to managed PostgreSQL.
+3. Keep `/health` returning `200` in Worker path.
+4. Run fail test by temporarily blocking DB primary and confirming provider failover.
+5. Keep alerts for Worker errors and database connectivity errors.
+
+### Model 2: Origin failover (Node servers)
+
+Use this only if you keep Node origins as primary compute.
+
+1. Run two Node origins in different regions/providers.
+2. Keep both origins on same managed HA PostgreSQL cluster.
+3. Create Cloudflare Load Balancer monitor for `/health`.
+4. Create primary and secondary pools and set failover steering.
+5. Point API DNS hostname to the Load Balancer.
+6. Test by stopping primary origin and validating automatic cutover.
+
+### Important note
+
+Cloudflare Load Balancer fails over between origins. It does not fail over to a Worker runtime. If Worker is your primary runtime, prioritize Worker + HA Postgres and monitor that path directly.
+
+
+
+
+
+

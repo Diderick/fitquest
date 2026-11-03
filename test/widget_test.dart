@@ -1,11 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fitquest/main.dart';
 import 'package:fitquest/offline_store.dart';
+import 'package:fitquest/step_tracker.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 void main() {
@@ -83,7 +85,7 @@ void main() {
     final store = OfflineStore.instance;
     expect(store.getDouble('bl_start'), 95.5);
     expect(store.getDouble('bl_current'), isNull);
-    await tester.enterText(find.byType(TextField).last, '94');
+    await tester.enterText(find.byType(TextField).at(1), '94');
     await tester.tap(find.text('Update weigh-in'));
     await tester
         .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
@@ -120,6 +122,71 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     expect(find.text('Recent activities'), findsOneWidget);
+    await tester.tap(find.byTooltip('Profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Phone step sensor'), findsNothing);
+  });
+
+  testWidgets('home page can turn the phone step sensor on and off',
+      (tester) async {
+    var enabled = false;
+    final calls = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(StepTracker.channel, (MethodCall call) async {
+      calls.add(call.method);
+      if (call.method == 'enable') enabled = true;
+      if (call.method == 'disable') enabled = false;
+      if (call.method != 'read') return null;
+      return {
+        'steps': enabled ? 1234 : 0,
+        'enabled': enabled,
+        'status': enabled ? 'Sensor active' : 'Sensor paused',
+      };
+    });
+    StepTracker.instance.enabled = false;
+    StepTracker.instance.today = 0;
+    try {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: HomePage(
+            workouts: const [],
+            weeklyGoalMinutes: 180,
+            onRecord: (_) {},
+            onLog: () {},
+            onUpdateWorkout: (_, __) async {},
+            onTab: (_) {},
+          ),
+        ),
+      ));
+      final sensorSwitch = find.byType(SwitchListTile);
+      await tester.ensureVisible(sensorSwitch);
+      expect(tester.widget<SwitchListTile>(sensorSwitch).value, isFalse);
+      await tester.tap(sensorSwitch);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(sensorSwitch).value, isTrue);
+      await tester.tap(sensorSwitch);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(sensorSwitch).value, isFalse);
+      expect(calls, containsAllInOrder(['enable', 'read', 'disable']));
+    } finally {
+      StepTracker.instance.enabled = false;
+      StepTracker.instance.today = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(StepTracker.channel, null);
+    }
+  });
+
+  testWidgets('quests keeps challenge creation separate from progress',
+      (tester) async {
+    await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: QuestsPage(workouts: []))));
+    expect(find.text('Progress'), findsOneWidget);
+    expect(find.text('Daily Quest'), findsOneWidget);
+
+    await tester.tap(find.text('Challenges'));
+    await tester.pumpAndSettle();
+    expect(find.text('Fitness challenges'), findsOneWidget);
+    expect(find.text('Daily Quest'), findsNothing);
   });
 
   testWidgets('records and persists an activity with distance and notes',

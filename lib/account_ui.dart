@@ -253,7 +253,6 @@ class _AccountPageState extends State<AccountPage> {
                         TextStyle(color: Theme.of(context).colorScheme.error)),
               const SizedBox(height: 24),
               const StepTrackingCard(),
-              const AdPreferences(),
             ]));
       });
 }
@@ -529,38 +528,4 @@ class StepTrackingCard extends StatelessWidget {
                               : 'Enable step counting')),
                     ])));
       });
-}
-
-class AdPreferences extends StatelessWidget {
-  const AdPreferences({super.key});
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-      animation: OfflineStore.instance,
-      builder: (context, _) => SwitchListTile(
-          title: const Text('Hide sponsor placements'),
-          subtitle: const Text(
-              'Free during preview. Live ads and a store purchase option will be configured later.'),
-          value: OfflineStore.instance.getBool('ads_hidden') ?? false,
-          onChanged: (hide) =>
-              OfflineStore.instance.setBool('ads_hidden', hide)));
-}
-
-class SponsorPlacement extends StatelessWidget {
-  const SponsorPlacement({super.key});
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-      animation: OfflineStore.instance,
-      builder: (context, _) =>
-          OfflineStore.instance.getBool('ads_hidden') == true
-              ? const SizedBox.shrink()
-              : Card(
-                  child: ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.campaign_outlined),
-                      title: const Text('Sponsor placement · preview'),
-                      subtitle: const Text('No live ads yet'),
-                      trailing: TextButton(
-                          onPressed: () =>
-                              OfflineStore.instance.setBool('ads_hidden', true),
-                          child: const Text('Hide')))));
 }

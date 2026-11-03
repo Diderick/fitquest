@@ -10,6 +10,10 @@ String nutritionTime(DateTime date) =>
 class NutritionEntry {
   final String id, name, kind, portion;
   final int calories;
+  final double servings;
+  final double proteinG;
+  final double carbsG;
+  final double fatG;
   final String? date, time;
   final bool legacy;
   const NutritionEntry(
@@ -20,6 +24,10 @@ class NutritionEntry {
       this.date,
       this.time,
       this.portion = '',
+      this.servings = 1,
+      this.proteinG = 0,
+      this.carbsG = 0,
+      this.fatG = 0,
       this.legacy = false});
   bool get undated => date == null;
   Map<String, dynamic> toJson() => {
@@ -30,6 +38,10 @@ class NutritionEntry {
         'date': date,
         'time': time,
         'portion': portion,
+        'servings': servings,
+        'protein_g': proteinG,
+        'carbs_g': carbsG,
+        'fat_g': fatG,
         'legacy': legacy
       };
   factory NutritionEntry.fromJson(Map<String, dynamic> json) => NutritionEntry(
@@ -40,6 +52,10 @@ class NutritionEntry {
       date: json['date'] as String?,
       time: json['time'] as String?,
       portion: json['portion'] as String? ?? '',
+      servings: (json['servings'] as num?)?.toDouble() ?? 1,
+      proteinG: (json['protein_g'] as num?)?.toDouble() ?? 0,
+      carbsG: (json['carbs_g'] as num?)?.toDouble() ?? 0,
+      fatG: (json['fat_g'] as num?)?.toDouble() ?? 0,
       legacy: json['legacy'] == true);
 }
 

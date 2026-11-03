@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'challenges.dart';
 import 'offline_store.dart';
 import 'friend_links.dart';
@@ -40,6 +41,48 @@ class _ChallengesPageState extends State<ChallengesPage> {
     }
   }
 
+  Future<void> joinWithCode(BuildContext context) async {
+    final controller = TextEditingController();
+    final code = await showDialog<String>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+                title: const Text('Join with a code'),
+                content: TextField(
+                    controller: controller,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                        labelText: 'Challenge code',
+                        helperText:
+                            'Ask the creator for the 8-character code.')),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(dialog),
+                      child: const Text('Cancel')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(dialog, controller.text),
+                      child: const Text('Join')),
+                ]));
+    controller.dispose();
+    if (code == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final challenge = await repo.joinWithCode(code);
+      if (!context.mounted) return;
+      messenger
+          .showSnackBar(SnackBar(content: Text('Joined ${challenge.title}.')));
+      await Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+              builder: (_) => ChallengeDetail(challenge: challenge)));
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(error is StateError
+              ? error.message
+              : 'No challenge matches that code, or you are offline.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: store,
@@ -50,11 +93,14 @@ class _ChallengesPageState extends State<ChallengesPage> {
             .toList();
         Widget tile(FitnessChallenge challenge) => Card(
             child: ListTile(
+                dense: true,
                 leading: const Icon(Icons.military_tech_outlined),
-                title: Text(challenge.title),
+                title: Text(challenge.title,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text(
-                    '${challenge.category} · ${challenge.events.length} events\n${challenge.startDate} to ${challenge.endDate}${challenge.ownerName == null ? '' : '\nBy @${challenge.ownerName}'}'),
-                isThreeLine: true,
+                    '${challenge.category} · ${challenge.events.length} events · ${challenge.startDate}–${challenge.endDate}${challenge.ownerName == null ? '' : ' · @${challenge.ownerName}'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.push(
                     context,
@@ -76,27 +122,33 @@ class _ChallengesPageState extends State<ChallengesPage> {
                           builder: (_) => const CreateChallengePage())),
                   icon: const Icon(Icons.add),
                   label: const Text('Create challenge')),
-              const SizedBox(height: 12),
-              const Text(
-                  'Build a military-style fitness test, a CrossFit-style workout or your own challenge. Set exercise rules, pass targets and scoring.'),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                  onPressed: () => joinWithCode(context),
+                  icon: const Icon(Icons.vpn_key_outlined),
+                  label: const Text('Join with a code')),
+              const SizedBox(height: 8),
               if (loading) const LinearProgressIndicator(),
-              if (message != null) Text(message!),
-              const SizedBox(height: 20),
+              if (message != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(message!,
+                      style: Theme.of(context).textTheme.bodySmall),
+                ),
+              const SizedBox(height: 16),
               Text('My challenges',
-                  style: Theme.of(context).textTheme.titleLarge),
+                  style: Theme.of(context).textTheme.titleMedium),
               if (mine.isEmpty)
-                const Text(
-                    'Create your first challenge. It works offline too.'),
+                const Text('No challenges yet. Create one to get started.'),
               ...mine.map(tile),
-              const SizedBox(height: 20),
-              Text('From people you follow',
-                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 16),
+              Text('Shared challenges',
+                  style: Theme.of(context).textTheme.titleMedium),
               if (!store.signedIn)
                 const Text(
-                    'Sign in and follow friends to discover their shared challenges.'),
+                    'Sign in and follow people to discover their challenges.'),
               if (store.signedIn && discovered.isEmpty)
-                const Text(
-                    'No shared challenges yet. Follow a creator and refresh.'),
+                const Text('No shared challenges yet.'),
               ...discovered.map(tile),
             ]));
       });
@@ -154,6 +206,7 @@ class _CreateChallengePageState extends State<CreateChallengePage> {
           startDate: _day(start),
           endDate: _day(end),
           visibility: visibility,
+          joinCode: newJoinCode(),
           events: events);
       await ChallengeRepository(await OfflineStore.getInstance())
           .create(challenge);
@@ -203,7 +256,9 @@ class _CreateChallengePageState extends State<CreateChallengePage> {
                   'Custom',
                   'Military-style test',
                   'CrossFit-style AMRAP',
-                  'CrossFit-style for time'
+                  'CrossFit-style for time',
+                  'Half marathon progression',
+                  'Comrades build-up'
                 ]
                     .map((v) => DropdownMenuItem(value: v, child: Text(v)))
                     .toList(),
@@ -215,7 +270,10 @@ class _CreateChallengePageState extends State<CreateChallengePage> {
                           ? 'Military'
                           : value.startsWith('CrossFit')
                               ? 'CrossFit'
-                              : 'Custom';
+                              : value.contains('marathon') ||
+                                      value.contains('Comrades')
+                                  ? 'Endurance'
+                                  : 'Custom';
                       events = challengeTemplate(value);
                     });
                   }
@@ -258,6 +316,8 @@ class _CreateChallengePageState extends State<CreateChallengePage> {
             if (visibility == 'followers')
               const Text(
                   'When signed in and synced, followers can join and see participant usernames and results. No weight or route data is shared.'),
+            const Text(
+                'Every challenge gets a join code you can share. Anyone with the code can join, and their results show up for you.'),
             const SizedBox(height: 20),
             Text('Exercises', style: Theme.of(context).textTheme.titleLarge),
             for (final event in events)
@@ -474,6 +534,30 @@ class _ChallengeDetailState extends State<ChallengeDetail> {
                   ? 'Private challenge'
                   : 'Shared with creator’s followers · self-reported results'),
               if (own) ...[
+                Card(
+                    child: ListTile(
+                        leading: const Icon(Icons.vpn_key_outlined),
+                        title: Text(challenge.joinCode == null
+                            ? 'No join code yet'
+                            : 'Join code: ${challenge.joinCode}'),
+                        subtitle: const Text(
+                            'Anyone with this code can join, even if they are not your follower. Their results appear in the rankings below once you are signed in and synced.'),
+                        trailing: challenge.joinCode == null
+                            ? TextButton(
+                                onPressed: () => repo.ensureJoinCode(challenge),
+                                child: const Text('Create'))
+                            : IconButton(
+                                tooltip: 'Copy code',
+                                icon: const Icon(Icons.copy),
+                                onPressed: () async {
+                                  await Clipboard.setData(
+                                      ClipboardData(text: challenge.joinCode!));
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                            content: Text('Code copied.')));
+                                  }
+                                }))),
                 SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Share with my followers'),

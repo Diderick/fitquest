@@ -84,7 +84,7 @@ class OfflineStore extends ChangeNotifier {
   }
 
   bool _syncable(String key) => RegExp(
-          r'^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|community_(posts|joined|liked)|nutrition[\w.:-]*|bl_(start|current|joined)|body_fat|profile_gender|profile_photo_v1|ads_hidden|friend_discovery|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following/[\w-]+)$')
+          r'^(fitquest\.activities\.v1|weekly_goal|appearance_mode|active_plan|training_difficulty|community_(posts|joined|liked|following_seen)|nutrition[\w.:-]*|bl_(start|current|joined)|bl_weight_history_v1|body_fat|profile_gender|profile_height_cm|profile_photo_v1|share_bmi|share_weight_journey|ads_hidden|fitquest\.custom_playlist\.v1|health_device_pref\.[\w.-]+|friend_discovery|challenge\.[\w-]+|challenge_join\.[\w-]+|challenge_result\.[\w-]+\.[\w-]+|steps\.[\w.-]+|following/[\w-]+)$')
       .hasMatch(key);
   Future<void> _persist() async {
     final saved = await _prefs!.setString(

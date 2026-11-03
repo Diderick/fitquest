@@ -1,5 +1,7 @@
-.env
+﻿.env
 data/
 cloudflare.yml
 tunnel-credentials.json
 client-config.json
+.wrangler/
+.env.cloudflare

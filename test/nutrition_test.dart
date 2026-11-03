@@ -107,6 +107,34 @@ void main() {
     expect(repo.forDay('2026-11-02').single.name, 'Water');
     expect(repo.forDay('2026-11-02').single.calories, 0);
     expect(repo.forDay('2026-11-02').single.portion, '250 ml');
+    expect(repo.forDay('2026-11-02').single.servings, 1);
+    expect(repo.forDay('2026-11-02').single.proteinG, 0);
     expect(repo.forDay('2026-11-01').single.calories, 350);
+  });
+
+  test('macro and servings values persist across restart', () async {
+    var store = OfflineStore();
+    await store.initialize();
+    var repo = NutritionRepository(store);
+    await repo.save(const NutritionEntry(
+        id: 'macro',
+        name: 'Protein shake',
+        kind: 'drink',
+        calories: 180,
+        servings: 1.5,
+        proteinG: 36,
+        carbsG: 4.5,
+        fatG: 2.3,
+        date: '2026-11-03',
+        time: '09:15'));
+
+    store = OfflineStore();
+    await store.initialize();
+    repo = NutritionRepository(store);
+    final entry = repo.forDay('2026-11-03').single;
+    expect(entry.servings, 1.5);
+    expect(entry.proteinG, 36);
+    expect(entry.carbsG, 4.5);
+    expect(entry.fatG, 2.3);
   });
 }

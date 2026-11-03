@@ -15,8 +15,29 @@ Uint8List? decodeProfilePhoto(Object? raw) {
   }
 }
 
+class SquareCropAdjustments {
+  final double centerX;
+  final double centerY;
+  final double zoom;
+  const SquareCropAdjustments(
+      {this.centerX = 0.5, this.centerY = 0.5, this.zoom = 1});
+}
+
+Rect _squareCropRect(
+    double width, double height, SquareCropAdjustments adjustments) {
+  final zoom = adjustments.zoom.clamp(1.0, 4.0);
+  final side = math.max(1.0, math.min(width, height) / zoom);
+  final half = side / 2;
+  final centerX =
+      (adjustments.centerX.clamp(0.0, 1.0) * width).clamp(half, width - half);
+  final centerY =
+      (adjustments.centerY.clamp(0.0, 1.0) * height).clamp(half, height - half);
+  return Rect.fromLTWH(centerX - half, centerY - half, side, side);
+}
+
 /// Re-renders pixels into a small PNG, excluding the source's location/EXIF metadata.
-Future<Uint8List> prepareProfilePhoto(Uint8List input) async {
+Future<Uint8List> prepareProfilePhoto(Uint8List input,
+    {SquareCropAdjustments adjustments = const SquareCropAdjustments()}) async {
   if (input.length > 20 * 1024 * 1024) {
     throw StateError('Choose a photo smaller than 20 MB.');
   }
@@ -35,12 +56,9 @@ Future<Uint8List> prepareProfilePhoto(Uint8List input) async {
         final recorder = ui.PictureRecorder();
         final canvas = Canvas(recorder);
         final image = frame.image;
-        final side = math.min(image.width, image.height).toDouble();
-        canvas.drawImageRect(
-            image,
-            Rect.fromLTWH((image.width - side) / 2, (image.height - side) / 2,
-                side, side),
-            const Rect.fromLTWH(0, 0, 256, 256),
+        final source = _squareCropRect(
+            image.width.toDouble(), image.height.toDouble(), adjustments);
+        canvas.drawImageRect(image, source, const Rect.fromLTWH(0, 0, 256, 256),
             Paint()..filterQuality = FilterQuality.high);
         final picture = recorder.endRecording();
         final thumbnail = await picture.toImage(256, 256);
@@ -65,6 +83,68 @@ Future<Uint8List> prepareProfilePhoto(Uint8List input) async {
     descriptor?.dispose();
     buffer.dispose();
   }
+}
+
+Future<Uint8List> prepareActivityPhoto(Uint8List input) async {
+  if (input.length > 25 * 1024 * 1024) {
+    throw StateError('Choose a photo smaller than 25 MB.');
+  }
+  final buffer = await ui.ImmutableBuffer.fromUint8List(input);
+  ui.ImageDescriptor? descriptor;
+  try {
+    descriptor = await ui.ImageDescriptor.encoded(buffer);
+    final scale =
+        math.min(1.0, 1280 / math.max(descriptor.width, descriptor.height));
+    final codec = await descriptor.instantiateCodec(
+        targetWidth: math.max(1, (descriptor.width * scale).round()),
+        targetHeight: math.max(1, (descriptor.height * scale).round()));
+    try {
+      final frame = await codec.getNextFrame();
+      try {
+        final image = frame.image;
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder);
+        canvas.drawImageRect(
+            image,
+            Rect.fromLTWH(
+                0, 0, image.width.toDouble(), image.height.toDouble()),
+            Rect.fromLTWH(
+                0, 0, image.width.toDouble(), image.height.toDouble()),
+            Paint()..filterQuality = FilterQuality.high);
+        final picture = recorder.endRecording();
+        final cleaned = await picture.toImage(image.width, image.height);
+        try {
+          final data = await cleaned.toByteData(format: ui.ImageByteFormat.png);
+          if (data == null || data.lengthInBytes > 1500 * 1024) {
+            throw StateError('Could not prepare this activity photo.');
+          }
+          return data.buffer.asUint8List();
+        } finally {
+          cleaned.dispose();
+          picture.dispose();
+        }
+      } finally {
+        frame.image.dispose();
+      }
+    } finally {
+      codec.dispose();
+    }
+  } finally {
+    descriptor?.dispose();
+    buffer.dispose();
+  }
+}
+
+Future<ui.Image> _decodeUiImage(Uint8List bytes) {
+  final decoded = ui.instantiateImageCodec(bytes);
+  return decoded.then((codec) async {
+    try {
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } finally {
+      codec.dispose();
+    }
+  });
 }
 
 class ProfilePhotoService {
@@ -118,13 +198,23 @@ class _ProfilePhotoButtonState extends State<ProfilePhotoButton> {
           .putAll({'_profile_photo_pending': scope}, expectedScope: scope);
       final selected = await ImagePicker().pickImage(
           source: action == 'camera' ? ImageSource.camera : ImageSource.gallery,
-          maxWidth: 640,
-          maxHeight: 640,
-          imageQuality: 80,
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 86,
           requestFullMetadata: false);
-      final bytes = selected == null
-          ? null
-          : await prepareProfilePhoto(await selected.readAsBytes());
+      Uint8List? bytes;
+      if (selected != null && mounted) {
+        final raw = await selected.readAsBytes();
+        if (!mounted) return;
+        final adjustments = await showModalBottomSheet<SquareCropAdjustments>(
+            context: context,
+            isScrollControlled: true,
+            showDragHandle: true,
+            builder: (_) => _ProfilePhotoAdjustSheet(input: raw));
+        if (adjustments != null) {
+          bytes = await prepareProfilePhoto(raw, adjustments: adjustments);
+        }
+      }
       await store.putAll({
         if (bytes != null) 'profile_photo_v1': base64Encode(bytes),
         '_profile_photo_pending': null
@@ -154,12 +244,14 @@ class _ProfilePhotoButtonState extends State<ProfilePhotoButton> {
               onSelected: choose,
               itemBuilder: (_) => [
                     const PopupMenuItem(
-                        value: 'gallery', child: Text('Choose photo')),
+                        value: 'gallery',
+                        child: Text('Choose and adjust photo')),
                     if (!kIsWeb &&
                         [TargetPlatform.android, TargetPlatform.iOS]
                             .contains(defaultTargetPlatform))
                       const PopupMenuItem(
-                          value: 'camera', child: Text('Take photo')),
+                          value: 'camera',
+                          child: Text('Take and adjust photo')),
                     if (photo != null)
                       const PopupMenuItem(
                           value: 'remove', child: Text('Remove photo'))
@@ -192,6 +284,129 @@ class _ProfilePhotoButtonState extends State<ProfilePhotoButton> {
       });
 }
 
+class _ProfilePhotoAdjustSheet extends StatefulWidget {
+  final Uint8List input;
+  const _ProfilePhotoAdjustSheet({required this.input});
+
+  @override
+  State<_ProfilePhotoAdjustSheet> createState() =>
+      _ProfilePhotoAdjustSheetState();
+}
+
+class _ProfilePhotoAdjustSheetState extends State<_ProfilePhotoAdjustSheet> {
+  late final Future<ui.Image> _imageFuture = _decodeUiImage(widget.input);
+  double zoom = 1;
+  double centerX = 0.5;
+  double centerY = 0.5;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+          child: Padding(
+        padding: EdgeInsets.fromLTRB(
+            20, 12, 20, MediaQuery.viewInsetsOf(context).bottom + 20),
+        child: FutureBuilder<ui.Image>(
+            future: _imageFuture,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Text('Could not load this image.');
+              }
+              if (!snapshot.hasData) {
+                return const SizedBox(
+                    height: 260,
+                    child: Center(child: CircularProgressIndicator()));
+              }
+              final image = snapshot.data!;
+              return Column(mainAxisSize: MainAxisSize.min, children: [
+                Text('Adjust profile photo',
+                    style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: 260,
+                  height: 260,
+                  child: CustomPaint(
+                    painter: _ProfileCropPreviewPainter(
+                        image: image,
+                        adjustments: SquareCropAdjustments(
+                            centerX: centerX, centerY: centerY, zoom: zoom)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(children: [
+                  const SizedBox(width: 96, child: Text('Zoom')),
+                  Expanded(
+                      child: Slider(
+                          min: 1,
+                          max: 4,
+                          value: zoom,
+                          onChanged: (value) => setState(() => zoom = value))),
+                ]),
+                Row(children: [
+                  const SizedBox(width: 96, child: Text('Horizontal')),
+                  Expanded(
+                      child: Slider(
+                          min: 0,
+                          max: 1,
+                          value: centerX,
+                          onChanged: (value) =>
+                              setState(() => centerX = value))),
+                ]),
+                Row(children: [
+                  const SizedBox(width: 96, child: Text('Vertical')),
+                  Expanded(
+                      child: Slider(
+                          min: 0,
+                          max: 1,
+                          value: centerY,
+                          onChanged: (value) =>
+                              setState(() => centerY = value))),
+                ]),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Expanded(
+                      child: OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancel'))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: FilledButton(
+                          onPressed: () => Navigator.pop(
+                              context,
+                              SquareCropAdjustments(
+                                  centerX: centerX,
+                                  centerY: centerY,
+                                  zoom: zoom)),
+                          child: const Text('Use photo'))),
+                ]),
+              ]);
+            }),
+      ));
+}
+
+class _ProfileCropPreviewPainter extends CustomPainter {
+  final ui.Image image;
+  final SquareCropAdjustments adjustments;
+  const _ProfileCropPreviewPainter(
+      {required this.image, required this.adjustments});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final src = _squareCropRect(
+        image.width.toDouble(), image.height.toDouble(), adjustments);
+    final dst = Offset.zero & size;
+    canvas.drawRRect(RRect.fromRectAndRadius(dst, const Radius.circular(24)),
+        Paint()..color = const Color(0x22000000));
+    canvas.save();
+    canvas.clipRRect(RRect.fromRectAndRadius(dst, const Radius.circular(24)));
+    canvas.drawImageRect(
+        image, src, dst, Paint()..filterQuality = FilterQuality.high);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ProfileCropPreviewPainter oldDelegate) =>
+      oldDelegate.image != image || oldDelegate.adjustments != adjustments;
+}
+
 class ProfileGenderSelector extends StatelessWidget {
   const ProfileGenderSelector({super.key});
   @override
@@ -200,7 +415,9 @@ class ProfileGenderSelector extends StatelessWidget {
       builder: (context, _) {
         final store = OfflineStore.instance;
         final scope = store.scope;
-        final gender = store.getString('profile_gender') ?? '';
+        final savedGender = store.getString('profile_gender') ?? '';
+        final gender =
+            savedGender == 'male' || savedGender == 'female' ? savedGender : '';
         return DropdownButtonFormField<String>(
             key: ValueKey('$scope:$gender'),
             initialValue: gender,
@@ -208,8 +425,7 @@ class ProfileGenderSelector extends StatelessWidget {
             items: const [
               DropdownMenuItem(value: '', child: Text('Not set')),
               DropdownMenuItem(value: 'male', child: Text('Male')),
-              DropdownMenuItem(value: 'female', child: Text('Female')),
-              DropdownMenuItem(value: 'other', child: Text('Other'))
+              DropdownMenuItem(value: 'female', child: Text('Female'))
             ],
             onChanged: (value) async {
               try {
